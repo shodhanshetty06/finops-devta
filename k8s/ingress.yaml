@@ -1,0 +1,31 @@
+# Assumes an ingress-nginx controller and cert-manager are already installed
+# on the cluster (both are standard on GKE/EKS/AKS via their respective
+# marketplace add-ons, but aren't installed by this manifest set - that's a
+# cluster-level decision, not an app-level one). Replace the host below with
+# your real domain before applying. See docs/DEPLOYMENT.md for the no-
+# ingress-controller alternative (plain LoadBalancer Service) if you'd
+# rather not run an ingress controller at all.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: finops-backend
+  namespace: finops
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "12m"  # slightly above FINOPS_MAX_UPLOAD_SIZE_BYTES (10MB) so the app's own limit is what actually rejects oversized uploads, not the ingress
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: ["api.your-finops-domain.example"]
+      secretName: finops-backend-tls
+  rules:
+    - host: api.your-finops-domain.example
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: finops-backend
+                port:
+                  number: 80

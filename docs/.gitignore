@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.sqlite3
+.env
+backend/secrets/
+backend/.venv/
+*.egg-info/
+.coverage
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*.local
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts

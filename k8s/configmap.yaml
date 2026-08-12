@@ -1,0 +1,35 @@
+# Non-secret configuration. Everything here is safe to read by anyone with
+# `kubectl get configmap` access - actual credentials live in secret.yaml.example
+# instead (see docs/DEPLOYMENT.md for how to create the real Secret).
+#
+# Values here are chosen to satisfy `validate_production_security()`
+# (backend/app/core/secrets.py) - FINOPS_ENVIRONMENT=production refuses to
+# boot with the old insecure defaults, so this file intentionally does NOT
+# use them.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: finops-config
+  namespace: finops
+data:
+  FINOPS_ENVIRONMENT: "production"
+  FINOPS_PRICING_PROVIDER: "mock"  # switch to "gcp" once a real billing credential is wired in - see secret.yaml.example
+  FINOPS_CLOUD_PROVIDER: "gcp"     # "gcp" | "aws" | "azure" - see docs/ROADMAP.md Phase 9
+  FINOPS_LOG_LEVEL: "INFO"
+  FINOPS_AUTO_CREATE_TABLES: "false"  # schema is managed by the migration Job (migration-job.yaml), not app startup
+  FINOPS_BCRYPT_ROUNDS: "12"
+  FINOPS_JWT_EXPIRE_MINUTES: "1440"
+  FINOPS_MAX_UPLOAD_SIZE_BYTES: "10485760"
+  FINOPS_RATE_LIMIT_ENABLED: "true"
+  FINOPS_RATE_LIMIT_REQUESTS_PER_MINUTE: "120"
+  FINOPS_RATE_LIMIT_HEAVY_REQUESTS_PER_MINUTE: "20"
+  FINOPS_REQUEST_LOGGING_ENABLED: "true"
+  FINOPS_REDIS_URL: "redis://finops-redis:6379/0"
+  # FINOPS_DATABASE_URL deliberately lives in the Secret (secret.yaml.example),
+  # not here - it embeds the Postgres password, and ConfigMap values are
+  # plaintext-readable by anyone with `kubectl get configmap` access in this
+  # namespace, which ordinary Secret RBAC is meant to be stricter about.
+  # CHANGE THIS to your real frontend origin(s) before deploying - a comma
+  # isn't valid here since this becomes a Python list via pydantic-settings'
+  # JSON-or-comma parsing; set as a JSON array string:
+  FINOPS_CORS_ALLOW_ORIGINS: '["https://your-frontend-domain.example"]'

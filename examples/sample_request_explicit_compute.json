@@ -1,0 +1,37 @@
+{
+  "project_name": "Retail Inventory API",
+  "region": "us-central1",
+  "normalization_strategy": "performance",
+  "compute": {
+    "machine_family": "e2",
+    "vcpu": 3,
+    "ram_gb": 10,
+    "instance_count": 2
+  },
+  "storage": {
+    "disk_type": "pd-balanced",
+    "size_gb": 157,
+    "snapshot_enabled": true,
+    "snapshot_retention_days": 14
+  },
+  "database": {
+    "required": true,
+    "engine": "postgres",
+    "size_gb": 100,
+    "vcpu": 2,
+    "ram_gb": 8,
+    "high_availability": true
+  },
+  "network": {
+    "load_balancer_required": true,
+    "external_ip_count": 1,
+    "estimated_egress_gb_per_month": 500,
+    "cdn_enabled": true
+  },
+  "availability": {
+    "high_availability": true,
+    "target_uptime_percent": 99.95,
+    "backup_frequency": "daily",
+    "disaster_recovery_required": true
+  }
+}

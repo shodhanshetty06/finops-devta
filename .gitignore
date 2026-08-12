@@ -1,0 +1,21 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
+*.sqlite3
+.env
+backend/secrets/
+# Phase 10: real k8s credentials - see k8s/secret.yaml.example
+k8s/secret.yaml
+backend/.venv/
+backend/venv/
+backend/pytest-cache-files-*/
+*.egg-info/
+.coverage
+node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*.local
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
+frontend_broken_*/

@@ -1,0 +1,20 @@
+# migration-job.yaml is deliberately NOT listed here - it's a run-once,
+# apply-then-wait-then-delete step in the deploy sequence, not part of the
+# steady-state stack. See docs/DEPLOYMENT.md for the full ordered sequence.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: finops
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - postgres.yaml
+  - redis.yaml
+  - backend.yaml
+  - celery-worker.yaml
+  - celery-beat.yaml
+  - ingress.yaml
+  # secret.yaml is gitignored (real credentials) - copy secret.yaml.example
+  # to secret.yaml and fill it in before `kubectl apply -k k8s/` will work.
+  # Kustomize can't conditionally include a file that may not exist, so it's
+  # deliberately left out of this list; apply it separately:
+  #   kubectl apply -f k8s/secret.yaml

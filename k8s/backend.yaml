@@ -1,0 +1,108 @@
+# The API itself. Stateless (no local disk state - uploads are read fully
+# into memory up to FINOPS_MAX_UPLOAD_SIZE_BYTES and never written to disk,
+# see app/core/uploads.py), so this scales horizontally with a plain
+# Deployment + HPA - no StatefulSet/sticky-session needs.
+#
+# Resource numbers below are a starting point, not a measured production
+# figure - see docs/LOAD_TEST_RESULTS.md for the (sandbox, non-production)
+# baseline this was derived from, and re-tune after a real load test against
+# this actual cluster/instance type.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-backend
+  namespace: finops
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: finops-backend
+  template:
+    metadata:
+      labels:
+        app: finops-backend
+    spec:
+      containers:
+        - name: backend
+          image: gcp-finops-backend:latest  # replace with your real registry/tag - see docs/DEPLOYMENT.md
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: finops-config
+            - secretRef:
+                name: finops-secrets
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            initialDelaySeconds: 15
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            # readOnlyRootFilesystem needs a writable /tmp: report generation
+            # itself is fully in-memory (BytesIO, no disk writes - see
+            # app/reports/), but FastAPI's multipart upload parsing
+            # (python-multipart's SpooledTemporaryFile) can spill uploads
+            # larger than its in-memory threshold to disk before
+            # read_upload_bounded (app/core/uploads.py) ever sees them.
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: finops-backend
+  namespace: finops
+spec:
+  selector:
+    app: finops-backend
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: finops-backend
+  namespace: finops
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: finops-backend
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: finops-backend
+  namespace: finops
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: finops-backend

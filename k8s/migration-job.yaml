@@ -1,0 +1,29 @@
+# FINOPS_AUTO_CREATE_TABLES=false in production (configmap.yaml) by design
+# (see app/core/secrets.py's validate_production_security, and the
+# docker-compose.yml comment this mirrors) - schema changes go through
+# Alembic explicitly, not silent create-on-boot. Run this Job once per
+# deploy, BEFORE rolling out backend.yaml/celery-worker.yaml, whenever
+# alembic/versions/ has new migrations:
+#
+#   kubectl apply -f k8s/migration-job.yaml
+#   kubectl wait --for=condition=complete --timeout=120s job/finops-migrate -n finops
+#   kubectl delete job/finops-migrate -n finops   # Jobs don't self-clean; delete before re-applying next deploy
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: finops-migrate
+  namespace: finops
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: gcp-finops-backend:latest  # replace with your real registry/tag - see docs/DEPLOYMENT.md
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: finops-config
+            - secretRef:
+                name: finops-secrets

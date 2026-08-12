@@ -1,0 +1,52 @@
+# Runs the async report-generation/batch-estimate tasks queued via
+# /api/v1/jobs/* (Phase 7). Without this Deployment running, the API still
+# accepts and enqueues jobs (POST returns 202) - they just stay PENDING
+# forever, same behavior documented in docker-compose.yml. No Service/
+# ports needed - this only pulls work from Redis, nothing calls it directly.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-celery-worker
+  namespace: finops
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: finops-celery-worker
+  template:
+    metadata:
+      labels:
+        app: finops-celery-worker
+    spec:
+      containers:
+        - name: celery-worker
+          image: gcp-finops-backend:latest  # same image as backend.yaml - replace with your real registry/tag
+          command: ["celery", "-A", "app.tasks.celery_app.celery_app", "worker", "--loglevel=INFO"]
+          envFrom:
+            - configMapRef:
+                name: finops-config
+            - secretRef:
+                name: finops-secrets
+          # Celery's own liveness check, not an HTTP endpoint - confirms the
+          # worker process is actually responding to the broker, not just
+          # that the container process hasn't crashed.
+          livenessProbe:
+            exec:
+              command:
+                - celery
+                - -A
+                - app.tasks.celery_app.celery_app
+                - inspect
+                - ping
+                - "--timeout=5"
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { cpu: "1", memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]

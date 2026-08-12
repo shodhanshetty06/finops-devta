@@ -1,0 +1,74 @@
+# StatefulSet rather than Deployment: Postgres needs stable storage/network
+# identity across restarts. For a real production deployment, prefer a
+# managed Postgres (Cloud SQL, RDS, etc.) over self-hosting this - this
+# manifest exists so the whole stack can be stood up with nothing but
+# `kubectl apply`, matching what docker-compose.yml does for local dev.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: finops-postgres
+  namespace: finops
+spec:
+  serviceName: finops-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: finops-postgres
+  template:
+    metadata:
+      labels:
+        app: finops-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: finops
+            - name: POSTGRES_USER
+              value: finops
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: finops-secrets
+                  key: POSTGRES_PASSWORD
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+              subPath: pgdata  # avoids postgres's "lost+found in an empty dir" complaint on some CSI drivers
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "finops", "-d", "finops"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "finops", "-d", "finops"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 250m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: finops-postgres
+  namespace: finops
+spec:
+  clusterIP: None  # headless - StatefulSet gets a stable DNS name, not a load-balanced one
+  selector:
+    app: finops-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432

@@ -1,0 +1,13 @@
+{
+  "project_name": "New Customer Portal",
+  "region": "us-central1",
+  "business": {
+    "total_users": 500,
+    "peak_concurrent_users": 500,
+    "notes": "Customer-facing portal, expected steady growth over 12 months."
+  },
+  "availability": {
+    "high_availability": true,
+    "target_uptime_percent": 99.99
+  }
+}

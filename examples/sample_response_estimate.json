@@ -1,0 +1,644 @@
+{
+  "estimate_id": "e3d2b225-b47e-4e69-9492-c44a08bf006f",
+  "project_name": "Retail Inventory API",
+  "strategy_used": "performance",
+  "original_request": {
+    "project_name": "Retail Inventory API",
+    "region": "us-central1",
+    "normalization_strategy": "performance",
+    "compute": {
+      "machine_family": "e2",
+      "vcpu": 3,
+      "ram_gb": 10.0,
+      "instance_count": 2,
+      "gpu_type": "none",
+      "gpu_count": 0
+    },
+    "storage": {
+      "disk_type": "pd-balanced",
+      "size_gb": 157,
+      "snapshot_enabled": true,
+      "snapshot_retention_days": 14
+    },
+    "database": {
+      "required": true,
+      "engine": "postgres",
+      "size_gb": 100,
+      "vcpu": 2,
+      "ram_gb": 8.0,
+      "high_availability": true
+    },
+    "network": {
+      "load_balancer_required": true,
+      "external_ip_count": 1,
+      "estimated_egress_gb_per_month": 500.0,
+      "estimated_ingress_gb_per_month": 0.0,
+      "cdn_enabled": true,
+      "vpn_required": false
+    },
+    "kubernetes": null,
+    "availability": {
+      "high_availability": true,
+      "target_uptime_percent": 99.95,
+      "backup_frequency": "daily",
+      "disaster_recovery_required": true
+    },
+    "business": null,
+    "existing_infrastructure_notes": null
+  },
+  "normalized_spec": {
+    "region": "us-central1",
+    "machine_type": "e2-standard-4",
+    "vcpu": 4,
+    "ram_gb": 16.0,
+    "instance_count": 2,
+    "disk_type": "pd-balanced",
+    "disk_size_gb": 157,
+    "gpu_type": null,
+    "gpu_count": 0,
+    "database_tier": "db-custom-2-8192",
+    "database_size_gb": 100,
+    "kubernetes_node_count": null,
+    "load_balancer": true
+  },
+  "assumptions": [
+    {
+      "field": "compute.vcpu",
+      "requested_value": "3",
+      "used_value": "4",
+      "reason": "3 vCPU configuration does not exist in the e2 family. Selected nearest higher supported value (performance strategy).",
+      "strategy_applied": "performance"
+    },
+    {
+      "field": "compute.ram_gb",
+      "requested_value": "10.0",
+      "used_value": "16.0",
+      "reason": "RAM is fixed per machine type in the e2 family; 'e2-standard-4' provides 16.0 GB.",
+      "strategy_applied": "performance"
+    }
+  ],
+  "validation": {
+    "results": [
+      {
+        "field": "compute.vcpu",
+        "rule": "cpu_validation",
+        "requested_value": "3",
+        "supported_value": null,
+        "is_valid": false,
+        "severity": "warning",
+        "reason": "3 vCPU does not exist as a standard configuration in the e2 family. Valid options: [1, 2, 4, 8, 16, 32].",
+        "recommendation": "Normalize to the nearest supported vCPU count per the configured strategy."
+      },
+      {
+        "field": "compute.ram_gb",
+        "rule": "ram_validation",
+        "requested_value": "10.0",
+        "supported_value": null,
+        "is_valid": false,
+        "severity": "warning",
+        "reason": "10.0 GB RAM is not offered as a standalone configuration in the e2 family. Valid RAM values: [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0].",
+        "recommendation": "Normalize to the RAM amount tied to the nearest supported vCPU/RAM pairing."
+      },
+      {
+        "field": "compute.machine_family",
+        "rule": "machine_family_validation",
+        "requested_value": "e2 (3 vCPU / 10.0 GB)",
+        "supported_value": null,
+        "is_valid": false,
+        "severity": "warning",
+        "reason": "No exact 'e2' machine type offers 3 vCPU with 10.0 GB RAM together.",
+        "recommendation": "Normalization engine will select the closest predefined machine type in this family, or an alternative family if none fits within tolerance."
+      },
+      {
+        "field": "region",
+        "rule": "region_validation",
+        "requested_value": "us-central1",
+        "supported_value": "us-central1",
+        "is_valid": true,
+        "severity": "info",
+        "reason": "'us-central1' is a supported Google Cloud region.",
+        "recommendation": "No action needed."
+      },
+      {
+        "field": "storage.size_gb",
+        "rule": "disk_validation",
+        "requested_value": "157",
+        "supported_value": "157",
+        "is_valid": true,
+        "severity": "info",
+        "reason": "157 GB is within the valid range for 'pd-balanced'.",
+        "recommendation": "No action needed."
+      },
+      {
+        "field": "storage.snapshot_retention_days",
+        "rule": "cloud_storage_validation",
+        "requested_value": "14",
+        "supported_value": "14",
+        "is_valid": true,
+        "severity": "info",
+        "reason": "Snapshot retention period is within a typical operational range.",
+        "recommendation": "No action needed."
+      },
+      {
+        "field": "database.vcpu_ram",
+        "rule": "cloud_sql_tier_validation",
+        "requested_value": "2 vCPU / 8.0 GB",
+        "supported_value": "2 vCPU / 8.0 GB",
+        "is_valid": true,
+        "severity": "info",
+        "reason": "Matches Cloud SQL tier 'db-custom-2-8192'.",
+        "recommendation": "No action needed."
+      },
+      {
+        "field": "network.load_balancer",
+        "rule": "load_balancer_validation",
+        "requested_value": "True",
+        "supported_value": "True",
+        "is_valid": true,
+        "severity": "info",
+        "reason": "Load balancer / CDN configuration is internally consistent.",
+        "recommendation": "No action needed."
+      },
+      {
+        "field": "network.estimated_egress_gb_per_month",
+        "rule": "network_validation",
+        "requested_value": "500.0",
+        "supported_value": "500.0",
+        "is_valid": true,
+        "severity": "info",
+        "reason": "Egress volume is within typical ranges.",
+        "recommendation": "No action needed."
+      },
+      {
+        "field": "availability.target_uptime_percent",
+        "rule": "availability_validation",
+        "requested_value": "99.95",
+        "supported_value": "99.95",
+        "is_valid": true,
+        "severity": "info",
+        "reason": "Uptime target is achievable with the requested configuration.",
+        "recommendation": "No action needed."
+      },
+      {
+        "field": "availability.backup_frequency",
+        "rule": "backup_validation",
+        "requested_value": "daily",
+        "supported_value": "daily",
+        "is_valid": true,
+        "severity": "info",
+        "reason": "Backup configuration is consistent with stated recovery requirements.",
+        "recommendation": "No action needed."
+      }
+    ]
+  },
+  "architecture": {
+    "summary": "Recommended architecture for 'Retail Inventory API' in us-central1: 11 components spanning Backend, Backup, Database, Disaster Recovery, Load Balancer, Monitoring, Networking, Security, Storage.",
+    "components": [
+      {
+        "layer": "Backend",
+        "service": "Compute Engine (e2-standard-4 x 2)",
+        "rationale": "Directly sized VM instances matching the requested/normalized compute profile."
+      },
+      {
+        "layer": "Database",
+        "service": "Cloud SQL (postgres, db-custom-2-8192) with High Availability (regional failover)",
+        "rationale": "Fully managed relational database matching the requested engine and sizing."
+      },
+      {
+        "layer": "Load Balancer",
+        "service": "External HTTP(S) Load Balancer",
+        "rationale": "Distributes traffic across backend instances/nodes and terminates TLS."
+      },
+      {
+        "layer": "Security",
+        "service": "Cloud Armor",
+        "rationale": "WAF and DDoS protection at the load balancer edge, recommended whenever a public LB is present."
+      },
+      {
+        "layer": "Networking",
+        "service": "Cloud CDN",
+        "rationale": "Edge caching for static/cacheable content to reduce latency and origin load."
+      },
+      {
+        "layer": "Storage",
+        "service": "Persistent Disk (pd-balanced)",
+        "rationale": "Block storage attached to compute instances."
+      },
+      {
+        "layer": "Backup",
+        "service": "Scheduled Persistent Disk Snapshots",
+        "rationale": "Automated snapshots with 14-day retention."
+      },
+      {
+        "layer": "Disaster Recovery",
+        "service": "Multi-region backup replication",
+        "rationale": "Cross-region snapshot/backup replication to support recovery objectives."
+      },
+      {
+        "layer": "Networking",
+        "service": "Multi-zone deployment",
+        "rationale": "Spreads instances across zones within the region to survive a single-zone outage."
+      },
+      {
+        "layer": "Monitoring",
+        "service": "Cloud Monitoring + Cloud Logging",
+        "rationale": "Standard observability stack for metrics, uptime checks, and centralized logs."
+      },
+      {
+        "layer": "Security",
+        "service": "IAM least-privilege roles + Secret Manager",
+        "rationale": "Baseline access control and secrets management for any production workload."
+      }
+    ]
+  },
+  "cost": {
+    "currency": "USD",
+    "line_items": [
+      {
+        "category": "Compute",
+        "description": "e2-standard-4 x 2 instance(s) (us-central1)",
+        "sku_id": "compute-e2-standard-4",
+        "unit": "hour",
+        "quantity": 1460.0,
+        "unit_price": 0.12928,
+        "currency": "USD",
+        "monthly_amount": 188.75,
+        "source": "mock_catalog"
+      },
+      {
+        "category": "Storage",
+        "description": "pd-balanced 157 GB x 2 disk(s) (us-central1)",
+        "sku_id": "disk-pd-balanced",
+        "unit": "GB-month",
+        "quantity": 314.0,
+        "unit_price": 0.1,
+        "currency": "USD",
+        "monthly_amount": 31.4,
+        "source": "mock_catalog"
+      },
+      {
+        "category": "Storage",
+        "description": "Persistent disk snapshots, 14-day retention",
+        "sku_id": "snapshot-storage",
+        "unit": "GB-month",
+        "quantity": 314.0,
+        "unit_price": 0.026,
+        "currency": "USD",
+        "monthly_amount": 8.16,
+        "source": "mock_catalog"
+      },
+      {
+        "category": "Database",
+        "description": "Cloud SQL db-custom-2-8192 (High Availability - synchronous standby) (us-central1)",
+        "sku_id": "cloudsql-db-custom-2-8192",
+        "unit": "hour",
+        "quantity": 730.0,
+        "unit_price": 0.2436,
+        "currency": "USD",
+        "monthly_amount": 177.83,
+        "source": "mock_catalog"
+      },
+      {
+        "category": "Database",
+        "description": "Cloud SQL storage 100 GB (us-central1)",
+        "sku_id": "cloudsql-storage",
+        "unit": "GB-month",
+        "quantity": 100.0,
+        "unit_price": 0.17,
+        "currency": "USD",
+        "monthly_amount": 17.0,
+        "source": "mock_catalog"
+      },
+      {
+        "category": "Network",
+        "description": "Internet egress, 500 GB/month",
+        "sku_id": "network-egress",
+        "unit": "GB",
+        "quantity": 500.0,
+        "unit_price": 0.12,
+        "currency": "USD",
+        "monthly_amount": 60.0,
+        "source": "mock_catalog"
+      },
+      {
+        "category": "Network",
+        "description": "External HTTP(S) Load Balancer (us-central1)",
+        "sku_id": "load-balancer",
+        "unit": "month",
+        "quantity": 1.0,
+        "unit_price": 18.25,
+        "currency": "USD",
+        "monthly_amount": 18.25,
+        "source": "mock_catalog"
+      }
+    ],
+    "discounts": [
+      {
+        "name": "Sustained Use Discount",
+        "description": "Automatically applied for on-demand instances running a full billing month.",
+        "percent_off": 20.0,
+        "monthly_savings": 37.75
+      }
+    ],
+    "subtotal_monthly": 501.39,
+    "discount_total_monthly": 37.75,
+    "tax_rate_percent": 0.0,
+    "tax_monthly": 0.0,
+    "support_plan_percent": 0.0,
+    "support_monthly": 0.0,
+    "total_monthly": 463.64,
+    "total_yearly": 5563.68,
+    "total_three_year": 16691.04
+  },
+  "audit_log": {
+    "estimate_id": "e3d2b225-b47e-4e69-9492-c44a08bf006f",
+    "entries": [
+      {
+        "timestamp": "2026-08-05T14:54:55.003081Z",
+        "actor": "system",
+        "action": "pipeline_start",
+        "field": null,
+        "detail": "Estimate requested for project 'Retail Inventory API'.",
+        "metadata": {
+          "strategy": "performance",
+          "region": "us-central1"
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003440Z",
+        "actor": "system",
+        "action": "validation",
+        "field": "compute.vcpu",
+        "detail": "3 vCPU does not exist as a standard configuration in the e2 family. Valid options: [1, 2, 4, 8, 16, 32].",
+        "metadata": {
+          "severity": "warning",
+          "rule": "cpu_validation",
+          "requested_value": "3",
+          "supported_value": null
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003450Z",
+        "actor": "system",
+        "action": "validation",
+        "field": "compute.ram_gb",
+        "detail": "10.0 GB RAM is not offered as a standalone configuration in the e2 family. Valid RAM values: [1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0].",
+        "metadata": {
+          "severity": "warning",
+          "rule": "ram_validation",
+          "requested_value": "10.0",
+          "supported_value": null
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003453Z",
+        "actor": "system",
+        "action": "validation",
+        "field": "compute.machine_family",
+        "detail": "No exact 'e2' machine type offers 3 vCPU with 10.0 GB RAM together.",
+        "metadata": {
+          "severity": "warning",
+          "rule": "machine_family_validation",
+          "requested_value": "e2 (3 vCPU / 10.0 GB)",
+          "supported_value": null
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003457Z",
+        "actor": "system",
+        "action": "validation",
+        "field": "region",
+        "detail": "'us-central1' is a supported Google Cloud region.",
+        "metadata": {
+          "severity": "info",
+          "rule": "region_validation",
+          "requested_value": "us-central1",
+          "supported_value": "us-central1"
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003463Z",
+        "actor": "system",
+        "action": "validation",
+        "field": "storage.size_gb",
+        "detail": "157 GB is within the valid range for 'pd-balanced'.",
+        "metadata": {
+          "severity": "info",
+          "rule": "disk_validation",
+          "requested_value": "157",
+          "supported_value": "157"
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003466Z",
+        "actor": "system",
+        "action": "validation",
+        "field": "storage.snapshot_retention_days",
+        "detail": "Snapshot retention period is within a typical operational range.",
+        "metadata": {
+          "severity": "info",
+          "rule": "cloud_storage_validation",
+          "requested_value": "14",
+          "supported_value": "14"
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003468Z",
+        "actor": "system",
+        "action": "validation",
+        "field": "database.vcpu_ram",
+        "detail": "Matches Cloud SQL tier 'db-custom-2-8192'.",
+        "metadata": {
+          "severity": "info",
+          "rule": "cloud_sql_tier_validation",
+          "requested_value": "2 vCPU / 8.0 GB",
+          "supported_value": "2 vCPU / 8.0 GB"
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003479Z",
+        "actor": "system",
+        "action": "validation",
+        "field": "network.load_balancer",
+        "detail": "Load balancer / CDN configuration is internally consistent.",
+        "metadata": {
+          "severity": "info",
+          "rule": "load_balancer_validation",
+          "requested_value": "True",
+          "supported_value": "True"
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003482Z",
+        "actor": "system",
+        "action": "validation",
+        "field": "network.estimated_egress_gb_per_month",
+        "detail": "Egress volume is within typical ranges.",
+        "metadata": {
+          "severity": "info",
+          "rule": "network_validation",
+          "requested_value": "500.0",
+          "supported_value": "500.0"
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003485Z",
+        "actor": "system",
+        "action": "validation",
+        "field": "availability.target_uptime_percent",
+        "detail": "Uptime target is achievable with the requested configuration.",
+        "metadata": {
+          "severity": "info",
+          "rule": "availability_validation",
+          "requested_value": "99.95",
+          "supported_value": "99.95"
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003488Z",
+        "actor": "system",
+        "action": "validation",
+        "field": "availability.backup_frequency",
+        "detail": "Backup configuration is consistent with stated recovery requirements.",
+        "metadata": {
+          "severity": "info",
+          "rule": "backup_validation",
+          "requested_value": "daily",
+          "supported_value": "daily"
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003669Z",
+        "actor": "normalization_engine",
+        "action": "normalization",
+        "field": "compute.vcpu",
+        "detail": "3 vCPU configuration does not exist in the e2 family. Selected nearest higher supported value (performance strategy).",
+        "metadata": {
+          "requested_value": "3",
+          "used_value": "4",
+          "strategy": "performance"
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003675Z",
+        "actor": "normalization_engine",
+        "action": "normalization",
+        "field": "compute.ram_gb",
+        "detail": "RAM is fixed per machine type in the e2 family; 'e2-standard-4' provides 16.0 GB.",
+        "metadata": {
+          "requested_value": "10.0",
+          "used_value": "16.0",
+          "strategy": "performance"
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003725Z",
+        "actor": "system",
+        "action": "architecture_recommendation",
+        "field": null,
+        "detail": "Recommended architecture for 'Retail Inventory API' in us-central1: 11 components spanning Backend, Backup, Database, Disaster Recovery, Load Balancer, Monitoring, Networking, Security, Storage.",
+        "metadata": {}
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003914Z",
+        "actor": "system",
+        "action": "pricing_lookup",
+        "field": "Compute",
+        "detail": "e2-standard-4 x 2 instance(s) (us-central1): 188.75 USD/month",
+        "metadata": {
+          "source": "mock_catalog",
+          "unit_price": 0.12928,
+          "quantity": 1460.0
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003920Z",
+        "actor": "system",
+        "action": "pricing_lookup",
+        "field": "Storage",
+        "detail": "pd-balanced 157 GB x 2 disk(s) (us-central1): 31.4 USD/month",
+        "metadata": {
+          "source": "mock_catalog",
+          "unit_price": 0.1,
+          "quantity": 314.0
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003924Z",
+        "actor": "system",
+        "action": "pricing_lookup",
+        "field": "Storage",
+        "detail": "Persistent disk snapshots, 14-day retention: 8.16 USD/month",
+        "metadata": {
+          "source": "mock_catalog",
+          "unit_price": 0.026,
+          "quantity": 314.0
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.003928Z",
+        "actor": "system",
+        "action": "pricing_lookup",
+        "field": "Database",
+        "detail": "Cloud SQL db-custom-2-8192 (High Availability - synchronous standby) (us-central1): 177.83 USD/month",
+        "metadata": {
+          "source": "mock_catalog",
+          "unit_price": 0.2436,
+          "quantity": 730.0
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.004016Z",
+        "actor": "system",
+        "action": "pricing_lookup",
+        "field": "Database",
+        "detail": "Cloud SQL storage 100 GB (us-central1): 17.0 USD/month",
+        "metadata": {
+          "source": "mock_catalog",
+          "unit_price": 0.17,
+          "quantity": 100.0
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.004023Z",
+        "actor": "system",
+        "action": "pricing_lookup",
+        "field": "Network",
+        "detail": "Internet egress, 500 GB/month: 60.0 USD/month",
+        "metadata": {
+          "source": "mock_catalog",
+          "unit_price": 0.12,
+          "quantity": 500.0
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.004027Z",
+        "actor": "system",
+        "action": "pricing_lookup",
+        "field": "Network",
+        "detail": "External HTTP(S) Load Balancer (us-central1): 18.25 USD/month",
+        "metadata": {
+          "source": "mock_catalog",
+          "unit_price": 18.25,
+          "quantity": 1.0
+        }
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.004035Z",
+        "actor": "system",
+        "action": "discount_applied",
+        "field": null,
+        "detail": "Sustained Use Discount: -37.75 USD/month (20.0%)",
+        "metadata": {}
+      },
+      {
+        "timestamp": "2026-08-05T14:54:55.004039Z",
+        "actor": "system",
+        "action": "pipeline_complete",
+        "field": null,
+        "detail": "Estimate generated: 463.64 USD/month.",
+        "metadata": {}
+      }
+    ]
+  }
+}

@@ -1,0 +1,179 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run test suite
+        working-directory: backend
+        run: pytest -q
+
+      - name: Verify Alembic migration chain applies cleanly
+        working-directory: backend
+        run: |
+          rm -f /tmp/ci_migration_check.db
+          FINOPS_DATABASE_URL="sqlite:////tmp/ci_migration_check.db" alembic upgrade head
+          FINOPS_DATABASE_URL="sqlite:////tmp/ci_migration_check.db" alembic downgrade base
+
+  integration-tests:
+    name: Integration tests (real HTTP server, real Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: finops
+          POSTGRES_PASSWORD: finops_dev_password
+          POSTGRES_DB: finops
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run integration suite (SQLite + Postgres journeys)
+        working-directory: backend
+        env:
+          FINOPS_TEST_POSTGRES_URL: "postgresql+psycopg2://finops:finops_dev_password@localhost:5432/finops"
+        run: pytest tests_integration -v
+
+  backend-security:
+    name: Backend dependency & static analysis scan
+    runs-on: ubuntu-latest
+    # Informational: surfaces new CVEs/static-analysis findings without
+    # blocking merges on them (a freshly-disclosed CVE in a transitive
+    # dependency shouldn't halt unrelated feature work) - see
+    # docs/SECURITY_REVIEW.md for the Phase 10 baseline review this
+    # pipeline is meant to keep from silently regressing.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pip-audit and bandit
+        run: pip install pip-audit bandit
+
+      - name: pip-audit
+        working-directory: backend
+        run: pip-audit -r requirements.txt -r requirements-dev.txt
+
+      - name: bandit
+        working-directory: backend
+        run: bandit -r app -q
+
+  frontend-checks:
+    name: Frontend typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        # `npm install` rather than `npm ci`: this dependency tree (eslint 9's
+        # ajv peer resolution specifically) was observed to resolve slightly
+        # differently across repeated installs in this sandbox during Phase
+        # 10 verification, which `npm ci` treats as a hard lockfile mismatch.
+        # `npm install` tolerates it; see docs/SECURITY_REVIEW.md / ROADMAP.md
+        # Phase 10 for the full note. Revisit `npm ci` once package-lock.json
+        # is regenerated on a real CI runner rather than this sandbox.
+        run: npm install
+
+      - name: Type check
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Unit tests
+        working-directory: frontend
+        run: npm test
+
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
+
+  frontend-security:
+    name: Frontend dependency scan
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        working-directory: frontend
+        # `npm install` rather than `npm ci`: this dependency tree (eslint 9's
+        # ajv peer resolution specifically) was observed to resolve slightly
+        # differently across repeated installs in this sandbox during Phase
+        # 10 verification, which `npm ci` treats as a hard lockfile mismatch.
+        # `npm install` tolerates it; see docs/SECURITY_REVIEW.md / ROADMAP.md
+        # Phase 10 for the full note. Revisit `npm ci` once package-lock.json
+        # is regenerated on a real CI runner rather than this sandbox.
+        run: npm install
+
+      - name: npm audit
+        working-directory: frontend
+        run: npm audit --omit=dev
+
+  docker-build:
+    name: Backend Docker image builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend image
+        working-directory: backend
+        run: docker build -t gcp-finops-backend:ci .

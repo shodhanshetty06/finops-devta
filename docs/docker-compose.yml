@@ -1,0 +1,63 @@
+# Phase 3: backend persists to `postgres` (users, projects, versioned
+# estimates, audit log rows) and uses JWT auth.
+# Phase 5: `redis` now backs the live GCP SKU cache (app/pricing/cache.py) -
+# falls back to an in-process cache automatically if unreachable. Set
+# FINOPS_PRICING_PROVIDER to "gcp" and provide a credential below to enable
+# live pricing; defaults to "mock" so this stack runs with zero GCP setup.
+version: "3.9"
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      FINOPS_PRICING_PROVIDER: mock
+      FINOPS_ENVIRONMENT: development
+      FINOPS_LOG_LEVEL: INFO
+      FINOPS_DATABASE_URL: postgresql+psycopg2://finops:finops_dev_password@postgres:5432/finops
+      # Table creation goes through Alembic in this compose setup (run once,
+      # see README) rather than FINOPS_AUTO_CREATE_TABLES, to mirror how a
+      # real deployment manages schema changes.
+      FINOPS_AUTO_CREATE_TABLES: "false"
+      # CHANGE THIS before deploying anywhere real - see .env.example.
+      FINOPS_JWT_SECRET_KEY: "change-me-to-a-random-secret-in-any-shared-environment"
+      FINOPS_REDIS_URL: redis://redis:6379/0
+      # To enable live pricing: set FINOPS_PRICING_PROVIDER=gcp above, mount
+      # a service account key, and uncomment one of:
+      # FINOPS_GCP_SERVICE_ACCOUNT_JSON: /run/secrets/gcp-service-account.json
+      # FINOPS_GCP_API_KEY: your-cloud-billing-api-key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: finops
+      POSTGRES_USER: finops
+      POSTGRES_PASSWORD: finops_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finops -d finops"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+volumes:
+  postgres_data:

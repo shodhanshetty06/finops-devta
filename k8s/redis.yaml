@@ -1,0 +1,49 @@
+# Backs the Celery broker/result backend, the SKU pricing cache (falls back
+# to in-process automatically if unreachable - app/pricing/cache.py), and
+# the rate limiter's counters. No persistent volume: losing this data is a
+# cache miss / Celery result loss, not data loss - Postgres is the system
+# of record. For real production traffic, prefer a managed Redis (e.g.
+# Memorystore) over self-hosting this single unreplicated instance.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-redis
+  namespace: finops
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: finops-redis
+  template:
+    metadata:
+      labels:
+        app: finops-redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            exec: { command: ["redis-cli", "ping"] }
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 250m, memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: finops-redis
+  namespace: finops
+spec:
+  selector:
+    app: finops-redis
+  ports:
+    - port: 6379
+      targetPort: 6379

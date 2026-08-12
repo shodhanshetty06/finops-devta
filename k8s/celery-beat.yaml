@@ -1,0 +1,39 @@
+# Fires the scheduled jobs registered in app/tasks/celery_app.py's
+# `beat_schedule` (currently: a daily sweep that deletes audit-log rows
+# older than FINOPS_AUDIT_LOG_RETENTION_DAYS). Deliberately `replicas: 1`
+# and a separate Deployment from finops-celery-worker - running more than
+# one beat process at a time causes duplicate task dispatch.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: finops-celery-beat
+  namespace: finops
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: finops-celery-beat
+  template:
+    metadata:
+      labels:
+        app: finops-celery-beat
+    spec:
+      containers:
+        - name: celery-beat
+          image: gcp-finops-backend:latest  # same image as backend.yaml - replace with your real registry/tag
+          command: ["celery", "-A", "app.tasks.celery_app.celery_app", "beat", "--loglevel=INFO"]
+          envFrom:
+            - configMapRef:
+                name: finops-config
+            - secretRef:
+                name: finops-secrets
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { cpu: 250m, memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
