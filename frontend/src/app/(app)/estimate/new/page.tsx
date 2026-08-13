@@ -47,13 +47,23 @@ export default function NewEstimatePage() {
   const [result, setResult] = useState<EstimateResult | null>(null);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 
+  // A project name is never required to price a workload - most people just
+  // have requirements, not a project yet. If the Basics field is left
+  // blank, a stable placeholder (generated once per visit) stands in so the
+  // estimate can still be generated; it's only ever shown to the user if
+  // they choose to save this to a project later.
+  const [defaultProjectName] = useState(() => `Quick Estimate ${new Date().toLocaleString()}`);
+
   const fullRequirement: CustomerRequirement = useMemo(
-    () => ({ ...requirement, selected_services: selection.asServiceSelections }),
-    [requirement, selection.asServiceSelections],
+    () => ({
+      ...requirement,
+      project_name: requirement.project_name.trim() || defaultProjectName,
+      selected_services: selection.asServiceSelections,
+    }),
+    [requirement, defaultProjectName, selection.asServiceSelections],
   );
 
   useEffect(() => {
-    if (!fullRequirement.project_name) return;
     const handle = setTimeout(async () => {
       setIsValidating(true);
       try {
@@ -68,7 +78,7 @@ export default function NewEstimatePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(fullRequirement)]);
 
-  const displayedValidation = fullRequirement.project_name ? validation : null;
+  const displayedValidation = validation;
   const hasBlockers = displayedValidation?.results.some((r) => r.severity === "blocker") ?? false;
 
   function getAddState(definition: GCPServiceDefinition): { disabled: boolean; label?: string } {
@@ -226,12 +236,12 @@ export default function NewEstimatePage() {
 
               <div className="flex flex-col gap-2">
                 {hasBlockers && (
-                  <Button variant="secondary" onClick={() => handleSubmit(true)} disabled={isSubmitting || !fullRequirement.project_name}>
+                  <Button variant="secondary" onClick={() => handleSubmit(true)} disabled={isSubmitting}>
                     {isSubmitting && <Spinner />}
                     Force through blockers
                   </Button>
                 )}
-                <Button onClick={() => handleSubmit(false)} disabled={isSubmitting || hasBlockers || !fullRequirement.project_name}>
+                <Button onClick={() => handleSubmit(false)} disabled={isSubmitting || hasBlockers}>
                   {isSubmitting && <Spinner />}
                   Generate estimate
                 </Button>

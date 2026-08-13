@@ -285,12 +285,20 @@ export const intakeApi = {
       .then((r) => r.data),
 };
 
+// -- Reports (stateless - renders an EstimateResult that isn't saved to a
+// project yet, e.g. a quick upload/wizard estimate) ------------------------
+
+export const reportsApi = {
+  exportExcelUrl: () => "/api/v1/reports/excel",
+  exportPdfUrl: () => "/api/v1/reports/pdf",
+};
+
 /** Downloads a report by streaming a POST response through axios (so the
  * Authorization header is attached) and saving it via a synthetic anchor -
  * a plain `<a href>` can't carry auth headers, and these export endpoints
  * require a logged-in user. */
-export async function downloadReport(url: string, filename: string, config?: AxiosRequestConfig) {
-  const response = await http.post(url, {}, { ...config, responseType: "blob" });
+export async function downloadReport(url: string, filename: string, body: unknown = {}, config?: AxiosRequestConfig) {
+  const response = await http.post(url, body, { ...config, responseType: "blob" });
   const blobUrl = window.URL.createObjectURL(new Blob([response.data]));
   const link = document.createElement("a");
   link.href = blobUrl;

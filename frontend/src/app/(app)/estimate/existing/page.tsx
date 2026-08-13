@@ -137,6 +137,8 @@ function ExistingEstimateContent() {
     } else if (loaded.request.business) {
       updateSizing.setSizing("business");
       updateSizing.update("business", loaded.request.business);
+    } else {
+      updateSizing.setSizing("none");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectId, loaded?.version]);

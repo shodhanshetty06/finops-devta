@@ -76,10 +76,13 @@ export function BasicsStep({ state }: { state: WizardState }) {
   const { requirement, update } = state;
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-      <Field label="Project name" htmlFor="project_name">
+      <Field
+        label="Project name (optional)"
+        htmlFor="project_name"
+        hint="Leave blank for a quick, unnamed estimate - a placeholder name is used until you save this to a project."
+      >
         <Input
           id="project_name"
-          required
           value={requirement.project_name}
           onChange={(e) => update("project_name", e.target.value)}
           placeholder="e.g. Customer Portal Migration"
@@ -150,7 +153,24 @@ export function SizingStep({ state }: { state: WizardState }) {
           <span className="block font-medium text-foreground">Size it for me</span>
           <span className="block text-xs text-muted-foreground">Describe your users/traffic and let the AI recommendation engine choose.</span>
         </button>
+        <button
+          type="button"
+          onClick={() => setSizing("none")}
+          className={cn(
+            "flex-1 rounded-md border p-3 text-left text-sm transition-colors",
+            sizingMode === "none" ? "border-primary bg-primary-50 dark:bg-primary-950" : "border-border hover:bg-muted/40",
+          )}
+        >
+          <span className="block font-medium text-foreground">None</span>
+          <span className="block text-xs text-muted-foreground">No Compute Engine VM in this estimate - price other GCP services only.</span>
+        </button>
       </div>
+
+      {sizingMode === "none" && (
+        <p className="text-xs text-muted-foreground">
+          No VM will be included in the cost calculation. Add other GCP services below to price the rest of the workload.
+        </p>
+      )}
 
       {sizingMode === "explicit" && requirement.compute && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

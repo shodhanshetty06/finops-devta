@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Download, Info, Upload as UploadIcon, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, Info, Upload as UploadIcon, XCircle } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -12,9 +12,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
-import { apiErrorMessage, intakeApi } from "@/lib/api-client";
+import { apiErrorMessage, downloadReport, intakeApi, reportsApi } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
-import type { IntakeResponse, ParseIssue } from "@/lib/types";
+import type { EstimateResult, IntakeResponse, ParseIssue } from "@/lib/types";
 
 function IssueIcon({ severity }: { severity: ParseIssue["severity"] }) {
   if (severity === "blocker") return <XCircle className="h-4 w-4 shrink-0" />;
@@ -31,6 +31,37 @@ function issueClasses(severity: ParseIssue["severity"]): string {
     default:
       return "text-primary-700 bg-primary-50 border-primary-200 dark:text-primary-300 dark:bg-primary-950 dark:border-primary-900";
   }
+}
+
+function ExportEstimateButtons({ estimate }: { estimate: EstimateResult }) {
+  const [downloading, setDownloading] = useState<"excel" | "pdf" | null>(null);
+
+  async function handleExport(kind: "excel" | "pdf") {
+    setDownloading(kind);
+    try {
+      const url = kind === "excel" ? reportsApi.exportExcelUrl() : reportsApi.exportPdfUrl();
+      const ext = kind === "excel" ? "xlsx" : "pdf";
+      const filename = `${estimate.project_name.replace(/[^a-zA-Z0-9]+/g, "_")}_estimate.${ext}`;
+      await downloadReport(url, filename, { estimate });
+    } catch (err) {
+      toast.error(`Could not export ${kind.toUpperCase()}`, { description: apiErrorMessage(err) });
+    } finally {
+      setDownloading(null);
+    }
+  }
+
+  return (
+    <div className="flex gap-2">
+      <Button variant="outline" size="sm" onClick={() => handleExport("excel")} disabled={downloading !== null}>
+        {downloading === "excel" ? <Spinner /> : <FileSpreadsheet className="h-4 w-4" />}
+        Export Excel
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => handleExport("pdf")} disabled={downloading !== null}>
+        {downloading === "pdf" ? <Spinner /> : <FileText className="h-4 w-4" />}
+        Export PDF
+      </Button>
+    </div>
+  );
 }
 
 export default function UploadExcelPage() {
@@ -150,9 +181,12 @@ export default function UploadExcelPage() {
                   <CheckCircle2 className="h-4 w-4" />
                   Priced successfully
                 </p>
-                <Button size="sm" onClick={() => setSaveDialogOpen(true)}>
-                  Save to a project
-                </Button>
+                <div className="flex items-center gap-2">
+                  <ExportEstimateButtons estimate={response.estimate} />
+                  <Button size="sm" onClick={() => setSaveDialogOpen(true)}>
+                    Save to a project
+                  </Button>
+                </div>
               </div>
               <EstimateResultView result={response.estimate} />
               {response.requirement && (

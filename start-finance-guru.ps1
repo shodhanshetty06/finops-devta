@@ -19,7 +19,20 @@
 
     Safe to run again while it's already running - it detects the ports
     are in use and just reopens the browser instead of starting duplicates.
+
+    Pass -Prod to browse the app at full speed: `next dev` recompiles each
+    page the first time you open it (a real ~seconds-long delay, worse on
+    Windows if antivirus is scanning the project folder), which feels like
+    the app is slow. -Prod runs `next build` once up front and serves the
+    optimized build instead, so every page responds immediately. You lose
+    hot-reload-on-save, so use plain `finance-guru` while actively editing
+    frontend code and `finance-guru -Prod` when you just want to click
+    around a fast, stable build.
 #>
+
+param(
+    [switch]$Prod
+)
 
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
@@ -106,6 +119,18 @@ if (Test-PortOpen $backendPort) {
 # -- Start frontend --------------------------------------------------------------
 if (Test-PortOpen $frontendPort) {
     Write-Ok "Frontend already running on port $frontendPort"
+} elseif ($Prod) {
+    Write-Step "Building frontend for production (skips per-page compile delays later)"
+    Push-Location $frontendDir
+    npx next build
+    Pop-Location
+    Write-Ok "Frontend build ready"
+
+    Write-Step "Starting frontend (production) on http://localhost:$frontendPort"
+    Start-Process powershell -WorkingDirectory $frontendDir -WindowStyle Normal -ArgumentList @(
+        "-NoExit", "-Command",
+        "Write-Host 'Finance Guru - Frontend (Next.js, production build)' -ForegroundColor Magenta; npx next start -p $frontendPort"
+    )
 } else {
     Write-Step "Starting frontend on http://localhost:$frontendPort"
     Start-Process powershell -WorkingDirectory $frontendDir -WindowStyle Normal -ArgumentList @(

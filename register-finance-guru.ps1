@@ -38,7 +38,7 @@ $functionBlock = @"
 
 $marker
 function finance-guru {
-    powershell -NoProfile -ExecutionPolicy Bypass -File "$launcherPath"
+    powershell -NoProfile -ExecutionPolicy Bypass -File "$launcherPath" @args
 }
 # --- end finance-guru ---
 "@

@@ -902,6 +902,64 @@ GCP_SERVICE_CATALOG: list[GCPServiceDefinition] = [
         ],
     ),
     GCPServiceDefinition(
+        service_id="genai-model-costing",
+        display_name="Generative AI Models (Gemini / Claude / GPT)",
+        category=CAT_AI_ML,
+        description=(
+            "Per-token cost of calling a hosted large language model through Vertex AI: Google's Gemini, "
+            "Anthropic's Claude (via Vertex AI Model Garden), and OpenAI's open-weight gpt-oss models (via "
+            "Vertex AI Model Garden serverless MaaS endpoints). Separate from the Vertex AI card above, which "
+            "covers custom training, endpoint hosting, and vector search instead of model token usage."
+        ),
+        icon="brain",
+        configuration_schema=[
+            _f("model", "Model", "select", default="gemini-2.5-flash", group="Model",
+               options=_opts(
+                   ("gemini-2.5-pro", "Gemini 2.5 Pro (Google)"),
+                   ("gemini-2.5-flash", "Gemini 2.5 Flash (Google)"),
+                   ("gemini-2.5-flash-lite", "Gemini 2.5 Flash-Lite (Google)"),
+                   ("claude-opus-4.5", "Claude Opus 4.5 (Anthropic, Model Garden)"),
+                   ("claude-sonnet-4.5", "Claude Sonnet 4.5 (Anthropic, Model Garden)"),
+                   ("claude-haiku-4.5", "Claude Haiku 4.5 (Anthropic, Model Garden)"),
+                   ("gpt-oss-120b", "gpt-oss-120b (OpenAI, Model Garden)"),
+                   ("gpt-oss-20b", "gpt-oss-20b (OpenAI, Model Garden)"),
+               ),
+               help_text="Each model has its own input/output token price - selecting it here drives both dimensions below."),
+            _f("model_region", "Region", "select", default="us-central1", group="Model",
+               options=_opts(
+                   ("us-central1", "us-central1 (Iowa)"),
+                   ("us-east5", "us-east5 (Columbus)"),
+                   ("europe-west1", "europe-west1 (Belgium)"),
+                   ("europe-west4", "europe-west4 (Netherlands)"),
+                   ("asia-southeast1", "asia-southeast1 (Singapore)"),
+                   ("global", "global (Gemini global endpoint)"),
+               ),
+               help_text=(
+                   "Vertex AI requires a region (or the 'global' endpoint) to call a model, and Model Garden "
+                   "partner models are only available in a subset of regions - this doesn't change the price "
+                   "shown (list price is uniform per model), only where you're allowed to call it from."
+               )),
+            _f("input_tokens_millions_per_month", "Input (prompt) tokens - millions/month", unit="M tokens",
+               default=0, group="Monthly Token Volume"),
+            _f("output_tokens_millions_per_month", "Output (completion) tokens - millions/month", unit="M tokens",
+               default=0, group="Monthly Token Volume"),
+        ],
+        pricing_dimensions=[
+            _d("model-input-tokens", "Input tokens", "input_tokens_millions_per_month", "million tokens", 0.30,
+               rate_selector_field_id="model", rate_by_option={
+                   "gemini-2.5-pro": 1.25, "gemini-2.5-flash": 0.30, "gemini-2.5-flash-lite": 0.10,
+                   "claude-opus-4.5": 5.00, "claude-sonnet-4.5": 3.00, "claude-haiku-4.5": 1.00,
+                   "gpt-oss-120b": 0.15, "gpt-oss-20b": 0.05,
+               }),
+            _d("model-output-tokens", "Output tokens", "output_tokens_millions_per_month", "million tokens", 2.50,
+               rate_selector_field_id="model", rate_by_option={
+                   "gemini-2.5-pro": 10.00, "gemini-2.5-flash": 2.50, "gemini-2.5-flash-lite": 0.40,
+                   "claude-opus-4.5": 25.00, "claude-sonnet-4.5": 15.00, "claude-haiku-4.5": 5.00,
+                   "gpt-oss-120b": 0.60, "gpt-oss-20b": 0.20,
+               }),
+        ],
+    ),
+    GCPServiceDefinition(
         service_id="gpu",
         display_name="GPU",
         category=CAT_AI_ML,

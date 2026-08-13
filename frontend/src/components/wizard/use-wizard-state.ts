@@ -14,7 +14,7 @@ import type {
   StorageRequirement,
 } from "@/lib/types";
 
-export type SizingMode = "explicit" | "business";
+export type SizingMode = "explicit" | "business" | "none";
 
 const DEFAULT_COMPUTE: ComputeRequirement = {
   machine_family: "e2",
@@ -114,7 +114,9 @@ export type WizardStepName = (typeof WIZARD_STEPS)[number];
 
 export function useWizardState(initial?: CustomerRequirement) {
   const [requirement, setRequirement] = useState<CustomerRequirement>(initial ?? emptyRequirement());
-  const [sizingMode, setSizingMode] = useState<SizingMode>(initial?.compute ? "explicit" : "business");
+  const [sizingMode, setSizingMode] = useState<SizingMode>(
+    initial?.compute ? "explicit" : initial?.business ? "business" : "none",
+  );
   const [stepIndex, setStepIndex] = useState(0);
 
   const update = useCallback(<K extends keyof CustomerRequirement>(key: K, value: CustomerRequirement[K]) => {

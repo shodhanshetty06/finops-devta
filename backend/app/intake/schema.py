@@ -31,9 +31,9 @@ class FieldSpec:
 TOP_LEVEL_SECTION = "Project Info"
 
 FIELD_SCHEMA: list[FieldSpec] = [
-    # -- Project Info (always required) --------------------------------------
+    # -- Project Info ---------------------------------------------------------
     FieldSpec(TOP_LEVEL_SECTION, "Project Name", ("project_name",), "str",
-              example="e.g. Retail Inventory API", required_if_section_used=True),
+              example="e.g. Retail Inventory API - leave blank for a quick, unnamed estimate"),
     FieldSpec(TOP_LEVEL_SECTION, "Region", ("region",), "enum",
               choices=[r.value for r in Region], example="us-central1"),
     FieldSpec(TOP_LEVEL_SECTION, "Normalization Strategy", ("normalization_strategy",), "enum",

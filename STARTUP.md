@@ -25,6 +25,8 @@ First run installs Python and npm dependencies (a few minutes); every run after 
 
 No Docker, Redis, or PostgreSQL needed for local use — this setup uses SQLite and an in-process job runner (see `backend/.env` for details, and how to switch to Redis/Postgres later if you want to).
 
+**Pages feel slow when you click around?** That's `next dev` compiling each page the first time you visit it (worse on Windows if antivirus is scanning the project folder — consider adding a Defender exclusion for this folder). If you're just using the app rather than editing frontend code, run `finance-guru -Prod` (or `.\start-finance-guru.ps1 -Prod`) instead — it builds once and serves the optimized build, so every page responds instantly. Switch back to plain `finance-guru` when you want hot-reload while coding.
+
 If `finance-guru` isn't found after registering, you're likely in a different shell than PowerShell — open a PowerShell terminal specifically (VS Code: the dropdown next to the `+` in the terminal panel lets you pick "PowerShell").
 
 You can also always run it directly without the alias:

@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 import { emptyRequirement, useWizardState, WIZARD_STEPS } from "@/components/wizard/use-wizard-state";
 
 describe("useWizardState", () => {
-  it("starts with an empty requirement and business sizing mode", () => {
+  it("starts with an empty requirement and no sizing mode chosen", () => {
     const { result } = renderHook(() => useWizardState());
     expect(result.current.requirement).toEqual(emptyRequirement());
-    expect(result.current.sizingMode).toBe("business");
+    expect(result.current.sizingMode).toBe("none");
     expect(result.current.stepIndex).toBe(0);
   });
 
@@ -37,6 +37,15 @@ describe("useWizardState", () => {
     act(() => result.current.setSizing("business"));
     expect(result.current.requirement.compute).toBeNull();
     expect(result.current.requirement.business).not.toBeNull();
+  });
+
+  it("setSizing('none') clears both compute and business", () => {
+    const { result } = renderHook(() => useWizardState());
+    act(() => result.current.setSizing("explicit"));
+    act(() => result.current.setSizing("none"));
+    expect(result.current.sizingMode).toBe("none");
+    expect(result.current.requirement.compute).toBeNull();
+    expect(result.current.requirement.business).toBeNull();
   });
 
   it("toggleSection adds the section with defaults when enabled", () => {

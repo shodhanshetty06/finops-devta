@@ -122,10 +122,13 @@ def test_project_intake_excel_unparseable_returns_400(api_client):
     _, headers = register_and_login(api_client, "intake-bad@example.com")
     project = api_client.post("/api/v1/projects", json={"name": "Bad Intake Project"}, headers=headers).json()
 
-    blank = ExcelTemplateGenerator().generate()  # no project name filled in -> unparseable
+    # A blank Project Name no longer makes a workbook unparseable (it just
+    # gets an auto-generated default - see excel_parser.py) - a genuinely
+    # corrupt/unreadable file is the remaining way to hit this 400.
     resp = api_client.post(
         f"/api/v1/projects/{project['id']}/intake/excel",
-        files={"file": ("blank.xlsx", blank, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        files={"file": ("not-a-workbook.xlsx", b"this is not a valid xlsx file at all",
+                         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
         headers=headers,
     )
     assert resp.status_code == 400

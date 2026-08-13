@@ -10,6 +10,7 @@ cleanly - the caller sees exactly which section/field failed and why via
 `Assumption` and `ValidationResult`.
 """
 import io
+from datetime import datetime, timezone
 
 import openpyxl
 from pydantic import ValidationError
@@ -75,10 +76,20 @@ class ExcelQuestionnaireParser:
                 sections[section_key][field_key] = coerced
 
         if not top_level.get("project_name"):
+            # No hard requirement to name a project up front - a customer who
+            # only has requirements (no project linked yet) can still get a
+            # priced estimate. A default name is generated so downstream
+            # code (which always expects a non-empty project_name) keeps
+            # working, and the substitution is surfaced as a WARNING rather
+            # than silently applied, per this parser's "always explain,
+            # never hide" philosophy.
+            default_name = f"Quick Estimate {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}"
+            top_level["project_name"] = default_name
             issues.append(ParseIssue(
-                field="Project Name", message="Project Name is required but was blank.", severity=Severity.BLOCKER,
+                field="Project Name",
+                message=f"Project Name was left blank - used '{default_name}' so this could still be parsed and priced. Rename it later when you save it to a project.",
+                severity=Severity.WARNING,
             ))
-            return None, issues
 
         built_sections: dict = {}
         for section_key, values in sections.items():
