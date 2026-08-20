@@ -169,9 +169,15 @@ class _Authenticator:
         from google.oauth2 import service_account
 
         if self._credentials is None:
-            self._credentials = service_account.Credentials.from_service_account_file(
-                self._service_account_path, scopes=_OAUTH_SCOPES,
-            )
+            try:
+                self._credentials = service_account.Credentials.from_service_account_file(
+                    self._service_account_path, scopes=_OAUTH_SCOPES,
+                )
+            except Exception as exc:  # noqa: BLE001 - re-raised as our own error type below
+                raise PricingProviderError(
+                    f"Could not load the GCP service account key file at "
+                    f"FINOPS_GCP_SERVICE_ACCOUNT_JSON={self._service_account_path!r}: {exc}"
+                ) from exc
         if not self._credentials.valid:
             try:
                 self._credentials.refresh(GoogleAuthRequest())

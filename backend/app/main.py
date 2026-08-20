@@ -1,4 +1,5 @@
 """FastAPI application entrypoint for the GCP FinOps Estimation Platform."""
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -27,9 +28,11 @@ from app.db.base import Base
 from app.db.session import engine
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_logging import RequestLoggingMiddleware
+from app.middleware.unhandled_exceptions import UnhandledExceptionMiddleware
 
 configure_logging()
 settings = get_settings()
+logger = logging.getLogger("app.unhandled")
 
 
 @asynccontextmanager
@@ -59,6 +62,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# UnhandledExceptionMiddleware is added first, which makes it the innermost
+# user middleware (closest to the router) - see the ordering note below.
+# That placement is load-bearing: a route that raises anything other than a
+# FinOpsError subclass (a real bug, not an expected domain error) would
+# otherwise propagate all the way to Starlette's ServerErrorMiddleware, which
+# sits *outside* every middleware added here, including CORSMiddleware. That
+# middleware's fallback 500 response never passes back through
+# CORSMiddleware, so it carries no Access-Control-Allow-Origin header - the
+# browser silently discards it and callers see a bare "Network Error"
+# instead of the actual failure (this is exactly how the intake/excel
+# auto-price bug this was diagnosed from presented). Catching the exception
+# here, inside CORSMiddleware, turns it into a normal response that CORS
+# still gets to add headers to.
+app.add_middleware(UnhandledExceptionMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_allow_origins,
@@ -107,6 +124,24 @@ async def finops_error_handler(request: Request, exc: FinOpsError):
     status_code = _STATUS_CODE_BY_EXCEPTION.get(type(exc), 400)
     headers = {"WWW-Authenticate": "Bearer"} if status_code == 401 else None
     return JSONResponse(status_code=status_code, content={"error": exc.code, "message": exc.message}, headers=headers)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # Any exception that isn't a FinOpsError (a genuine bug, not an expected
+    # domain error) would otherwise propagate past this app to Starlette's
+    # ServerErrorMiddleware, which sits *outside* CORSMiddleware and returns
+    # a plain-text 500 with no CORS headers at all. Browsers then block that
+    # response from ever reaching client JS, so callers see a bare "Network
+    # Error" instead of the actual failure - see the intake/excel upload bug
+    # this was diagnosed from. Handling it here keeps the response inside
+    # the normal FastAPI exception-handler path, which CORSMiddleware does
+    # process, while still logging the real traceback server-side.
+    logger.exception("Unhandled exception on %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=500,
+        content={"error": "internal_error", "message": "An unexpected error occurred. Please try again."},
+    )
 
 
 app.include_router(health.router)
