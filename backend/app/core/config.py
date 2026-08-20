@@ -162,6 +162,7 @@ class Settings(BaseSettings):
     rate_limit_heavy_requests_per_minute: int = Field(default=20, gt=0)
     rate_limit_heavy_path_prefixes: list[str] = [
         "/api/v1/estimate", "/api/v1/reports", "/api/v1/jobs", "/api/v1/intake", "/api/v1/auth/login",
+        "/api/v1/assistant",
     ]
 
     # -- Request logging (Phase 7) ---------------------------------------------
@@ -174,6 +175,16 @@ class Settings(BaseSettings):
     # deployment never needs to put a raw secret value directly in an env var.
     jwt_secret_key_file: str | None = None
 
+    # -- AI Assistant (Phase 11) -------------------------------------------
+    # Backs the floating chat widget (frontend/src/components/ai-assistant.tsx)
+    # with a real Claude call instead of the local keyword-matched FAQ it
+    # previously used. Unset by default - the endpoint returns 503 rather
+    # than silently falling back to a canned answer, so the frontend can
+    # tell "not configured" apart from "the model call failed" and show the
+    # user something honest either way.
+    anthropic_api_key: str | None = None
+    assistant_model: str = "claude-opus-5"
+
     # -- Audit log retention ---------------------------------------------------
     # Per-estimate audit trail rows (app/db/models.py::AuditLogRowModel) are
     # only ever shown to admins (see EstimateResultView / projects.py
@@ -181,6 +192,18 @@ class Settings(BaseSettings):
     # retain them beyond a short compliance/debugging window. A daily Celery
     # beat task (app/tasks/audit_tasks.py) purges rows older than this.
     audit_log_retention_days: int = Field(default=2, ge=1)
+
+    @model_validator(mode="after")
+    def _normalize_database_url(self) -> "Settings":
+        # Some managed Postgres providers (notably Heroku-style connection
+        # strings) still hand out the legacy "postgres://" scheme, which
+        # SQLAlchemy 2.x no longer recognizes ("Could not parse SQLAlchemy
+        # URL"). Neon's own connection strings already use "postgresql://",
+        # so this is purely a defensive fallback, not something Neon itself
+        # requires.
+        if self.database_url.startswith("postgres://"):
+            self.database_url = "postgresql://" + self.database_url[len("postgres://"):]
+        return self
 
     @model_validator(mode="after")
     def _validate_cloud_provider(self) -> "Settings":

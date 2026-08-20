@@ -1,0 +1,35 @@
+# Render Blueprint - optional infra-as-code alternative to configuring the
+# Web Service by hand in the Render dashboard (see docs/DEPLOY_FREE_TIER.md
+# for the equivalent click-through steps and full explanation of each var).
+# Import: Render dashboard -> New -> Blueprint -> select this repo.
+#
+# Neon Postgres is not provisioned here - Render Blueprints don't manage
+# external databases. Create the Neon project separately and paste its
+# connection string into FINOPS_DATABASE_URL below (or as a dashboard
+# secret) after the blueprint is applied.
+services:
+  - type: web
+    name: finops-backend
+    runtime: docker
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    rootDir: backend
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: FINOPS_ENVIRONMENT
+        value: production
+      - key: FINOPS_DATABASE_URL
+        sync: false # paste the Neon connection string here
+      - key: FINOPS_AUTO_CREATE_TABLES
+        value: "false"
+      - key: FINOPS_JWT_SECRET_KEY
+        generateValue: true # Render generates a random 32+ char value
+      - key: FINOPS_PRICING_PROVIDER
+        value: gcp
+      - key: FINOPS_CLOUD_PROVIDER
+        value: gcp
+      - key: FINOPS_CORS_ALLOW_ORIGINS
+        sync: false # e.g. ["https://your-app.vercel.app"]
+      - key: FINOPS_GCP_SERVICE_ACCOUNT_JSON
+        sync: false # path to a mounted Render Secret File, e.g. /etc/secrets/gcp-service-account.json

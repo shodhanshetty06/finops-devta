@@ -71,12 +71,25 @@ Confirm it printed `Running upgrade ... -> 0002_add_project_budget.py`
    | `FINOPS_DATABASE_URL` | the Neon connection string from step 1 |
    | `FINOPS_AUTO_CREATE_TABLES` | `false` |
    | `FINOPS_JWT_SECRET_KEY` | a random value - generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`, paste the output |
-   | `FINOPS_PRICING_PROVIDER` | `mock` |
+   | `FINOPS_PRICING_PROVIDER` | `gcp` for real Google Cloud list pricing (needs step 3b below); `mock` if you want to defer GCP credential setup and use deterministic mock catalog prices for now - the app boots either way and only logs a warning on `mock` in production |
    | `FINOPS_CLOUD_PROVIDER` | `gcp` |
    | `FINOPS_CORS_ALLOW_ORIGINS` | `["http://localhost:3000"]` for now - you'll change this in step 5 once the Vercel URL exists |
 
    Leave `FINOPS_REDIS_URL` unset - the app falls back to in-memory
    automatically.
+
+3b. **(Only if `FINOPS_PRICING_PROVIDER=gcp`)** wire up a GCP credential -
+   never put the raw service-account JSON in an env var:
+   - Render dashboard -> your service -> **Environment** -> **Secret
+     Files** -> add a file, path `/etc/secrets/gcp-service-account.json`,
+     paste the service account key JSON as its content (the same file used
+     locally at `backend/secrets/gcp-service-account.json`, which is
+     gitignored and must never be committed).
+   - Add env var `FINOPS_GCP_SERVICE_ACCOUNT_JSON` =
+     `/etc/secrets/gcp-service-account.json`.
+   - Simpler alternative: skip the secret file and set
+     `FINOPS_GCP_API_KEY` to a Cloud Billing API key instead (only needs
+     the "Cloud Billing API" scope, no project IAM roles).
 
    These three are enforced by `validate_production_security()`
    (`backend/app/core/secrets.py`) - the app **refuses to boot** with

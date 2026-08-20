@@ -79,3 +79,13 @@ class IntakeParseError(FinOpsError):
 
     def __init__(self, message: str = "The uploaded file could not be read."):
         super().__init__(message, code="intake_parse_error")
+
+
+class AssistantUnavailableError(FinOpsError):
+    """Raised when the AI assistant can't answer - no API key configured,
+    or the Claude API call itself failed (auth, rate limit, network,
+    server error). Never raised for "the model didn't know the answer" -
+    that's a normal 200 response with an honest answer."""
+
+    def __init__(self, message: str = "The AI assistant is temporarily unavailable."):
+        super().__init__(message, code="assistant_unavailable")

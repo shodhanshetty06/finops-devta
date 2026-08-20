@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+pytest-cache-files-*/
+.venv/
+venv/
+*.db
+*.db-journal
+.env
+.env.*
+secrets/
+tests/
+tests_integration/
+loadtest/
+.git/

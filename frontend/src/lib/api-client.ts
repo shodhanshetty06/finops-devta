@@ -6,6 +6,8 @@ import axios, { type AxiosRequestConfig } from "axios";
 
 import type {
   ApiErrorBody,
+  AssistantChatResponse,
+  AssistantMessagePayload,
   CarbonEstimate,
   CloudComparison,
   CloudSqlTierSpec,
@@ -283,6 +285,13 @@ export const intakeApi = {
     http
       .post<IntakeResponse>("/api/v1/intake/text", body, { params: { auto_estimate: autoEstimate } })
       .then((r) => r.data),
+};
+
+// -- AI assistant chat (Phase 11) ------------------------------------------
+
+export const assistantApi = {
+  chat: (message: string, history: AssistantMessagePayload[]) =>
+    http.post<AssistantChatResponse>("/api/v1/assistant/chat", { message, history }).then((r) => r.data),
 };
 
 // -- Reports (stateless - renders an EstimateResult that isn't saved to a

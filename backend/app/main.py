@@ -5,9 +5,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.api.routers import auth, catalog, currency, estimate, health, intake, jobs, optimization, projects, reports, service_catalog, validate
+from app.api.routers import assistant, auth, catalog, currency, estimate, health, intake, jobs, optimization, projects, reports, service_catalog, validate
 from app.core.config import get_settings
 from app.core.exceptions import (
+    AssistantUnavailableError,
     CatalogUnavailableError,
     CurrencyProviderError,
     DuplicateEmailError,
@@ -85,6 +86,7 @@ _STATUS_CODE_BY_EXCEPTION = {
     PricingProviderError: 502,
     CurrencyProviderError: 502,
     PayloadTooLargeError: 413,
+    AssistantUnavailableError: 503,
 }
 
 
@@ -119,3 +121,4 @@ app.include_router(intake.router)
 app.include_router(jobs.router)
 app.include_router(optimization.router)
 app.include_router(currency.router)
+app.include_router(assistant.router)

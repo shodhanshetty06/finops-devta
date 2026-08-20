@@ -4,7 +4,7 @@ import { Bot, Send, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { answerAssistantQuery } from "@/lib/assistant-knowledge";
+import { apiErrorMessage, assistantApi } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { useEscapeKey } from "@/hooks/use-dismiss";
 
@@ -14,37 +14,61 @@ interface Message {
   text: string;
 }
 
+// How many prior turns to resend as context on each call - a support widget
+// doesn't need the full transcript, and every turn resent is billed input
+// tokens on every subsequent message (see backend/app/domain/assistant.py).
+const MAX_HISTORY_TURNS = 10;
+
 const SUGGESTIONS = ["How do discounts work?", "What do validation severities mean?", "What's normalization?", "What optimization features exist?"];
 
 const WELCOME: Message = {
   id: "welcome",
   role: "assistant",
-  text: "Hi, I'm the FinOps Assistant. Ask me about pricing, validation, normalization, architecture, or optimization - I answer from this platform's own rules, not a generic model.",
+  text: "Hi, I'm the FinOps Assistant, powered by Claude. Ask me about pricing, validation, normalization, architecture, or optimization on this platform.",
 };
 
-/** Floating help widget, bottom-right, mounted once in the app shell. See
- * lib/assistant-knowledge.ts for why this is a local FAQ matcher rather
- * than a live LLM call. */
+/** Floating help widget, bottom-right, mounted once in the app shell. Calls
+ * POST /api/v1/assistant/chat (backend/app/api/routers/assistant.py), which
+ * itself calls Claude with a system prompt grounded in this platform's real
+ * documented behavior - see backend/app/services/assistant_service.py. */
 export function AiAssistant() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEscapeKey(open, () => setOpen(false));
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, open]);
+  }, [messages, open, sending]);
 
-  function send(text: string) {
+  async function send(text: string) {
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || sending) return;
+
+    const history = messages
+      .filter((m) => m.id !== "welcome")
+      .slice(-MAX_HISTORY_TURNS)
+      .map((m) => ({ role: m.role, text: m.text }));
+
     const userMessage: Message = { id: crypto.randomUUID(), role: "user", text: trimmed };
-    const { text: answer } = answerAssistantQuery(trimmed);
-    const assistantMessage: Message = { id: crypto.randomUUID(), role: "assistant", text: answer };
-    setMessages((prev) => [...prev, userMessage, assistantMessage]);
+    setMessages((prev) => [...prev, userMessage]);
     setDraft("");
+    setSending(true);
+
+    try {
+      const { text: answer } = await assistantApi.chat(trimmed, history);
+      setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", text: answer }]);
+    } catch (error) {
+      setMessages((prev) => [
+        ...prev,
+        { id: crypto.randomUUID(), role: "assistant", text: `Sorry, I couldn't get an answer: ${apiErrorMessage(error)}` },
+      ]);
+    } finally {
+      setSending(false);
+    }
   }
 
   return (
@@ -63,7 +87,7 @@ export function AiAssistant() {
               </span>
               <div className="flex flex-col leading-tight">
                 <span className="text-sm font-semibold text-foreground">FinOps Assistant</span>
-                <span className="text-[11px] text-muted-foreground">Answers from platform docs</span>
+                <span className="text-[11px] text-muted-foreground">Powered by Claude</span>
               </div>
             </div>
             <button
@@ -89,6 +113,15 @@ export function AiAssistant() {
                 </div>
               </div>
             ))}
+            {sending && (
+              <div className="flex justify-start">
+                <div className="flex items-center gap-1 rounded-lg bg-muted px-3 py-2 text-foreground">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.3s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current [animation-delay:-0.15s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-current" />
+                </div>
+              </div>
+            )}
           </div>
 
           {messages.length <= 1 && (
@@ -98,7 +131,8 @@ export function AiAssistant() {
                   key={s}
                   type="button"
                   onClick={() => send(s)}
-                  className="rounded-full border border-border-strong px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary-300 hover:text-foreground"
+                  disabled={sending}
+                  className="rounded-full border border-border-strong px-2.5 py-1 text-[11px] text-muted-foreground transition-colors hover:border-primary-300 hover:text-foreground disabled:opacity-50"
                 >
                   {s}
                 </button>
@@ -118,9 +152,10 @@ export function AiAssistant() {
               onChange={(e) => setDraft(e.target.value)}
               placeholder="Ask about pricing, validation..."
               aria-label="Message the assistant"
-              className="h-9 w-full rounded-md border border-border-strong bg-input px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              disabled={sending}
+              className="h-9 w-full rounded-md border border-border-strong bg-input px-3 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
             />
-            <Button type="submit" size="icon" aria-label="Send" disabled={!draft.trim()}>
+            <Button type="submit" size="icon" aria-label="Send" disabled={!draft.trim() || sending}>
               <Send className="h-4 w-4" />
             </Button>
           </form>

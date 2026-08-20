@@ -12,6 +12,7 @@ import {
   LayoutDashboard,
   Network,
   PlusCircle,
+  Scale,
   Settings,
   ShieldCheck,
   SlidersHorizontal,
@@ -55,6 +56,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Analyze",
     items: [
       { label: "Pricing", href: "/pricing", icon: Tags, description: "Browse the GCP catalog & compare regions" },
+      { label: "Resource Optimization", href: "/optimization", icon: Scale, description: "Compare a saved resource's config against an upgrade/downgrade" },
       { label: "Validation", href: "/validation", icon: ShieldCheck, description: "Rule engine reference & live validator" },
       { label: "Normalization", href: "/normalization", icon: SlidersHorizontal, description: "How ambiguous input gets resolved" },
       { label: "Architecture", href: "/architecture", icon: Network, description: "Recommended service architecture" },

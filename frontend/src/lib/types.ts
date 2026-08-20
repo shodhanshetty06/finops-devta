@@ -616,3 +616,15 @@ export interface ExchangeRatesResponse {
   stale: boolean;
   supported_currencies: string[];
 }
+
+// -- AI assistant chat (backend/app/domain/assistant.py) ----------------
+
+export interface AssistantMessagePayload {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export interface AssistantChatResponse {
+  text: string;
+  model: string;
+}

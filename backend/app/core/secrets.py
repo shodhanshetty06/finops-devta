@@ -11,7 +11,11 @@ Deliberately does nothing in non-production environments (`development`,
 `test`, anything else) - the whole point of `insecure-dev-secret-change-me`
 being obviously-named is that local dev never needs to set a real secret.
 """
+import logging
+
 from app.core.config import Settings
+
+logger = logging.getLogger(__name__)
 
 _KNOWN_INSECURE_JWT_SECRET = "insecure-dev-secret-change-me"  # nosec B105 - sentinel value this guard detects, not a real credential
 _PRODUCTION_ENVIRONMENT_NAMES = {"production", "prod"}
@@ -81,6 +85,21 @@ def validate_production_security(settings: Settings) -> None:
         problems.append(
             "FINOPS_AUTO_CREATE_TABLES is true - disable it in production and manage "
             "schema changes via `alembic upgrade head` instead."
+        )
+
+    # Non-fatal: unlike the checks above, running the mock pricing provider
+    # in production is a legitimate choice for some deployments (e.g. a
+    # demo/free-tier deploy with no GCP billing credentials configured yet -
+    # see docs/DEPLOY_FREE_TIER.md), so this warns instead of refusing to
+    # boot. It only applies when cloud_provider="gcp": AWS/Azure have no
+    # live pricing provider yet, so their mock is the only option regardless
+    # of environment.
+    if settings.cloud_provider == "gcp" and settings.pricing_provider == "mock":
+        logger.warning(
+            "FINOPS_ENVIRONMENT=production but FINOPS_PRICING_PROVIDER=mock - estimates will use "
+            "deterministic mock catalog prices, not live Google Cloud pricing. Set "
+            "FINOPS_PRICING_PROVIDER=gcp (with FINOPS_GCP_SERVICE_ACCOUNT_JSON or FINOPS_GCP_API_KEY) "
+            "once real pricing is required."
         )
 
     if problems:
