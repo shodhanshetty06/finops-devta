@@ -38,6 +38,7 @@ from app.intake.excel_parser import ExcelQuestionnaireParser
 from app.intake.text_extractor import NaturalLanguageRequirementExtractor
 from app.pricing.currency_converter import CurrencyConverter, convert_estimate_currency, get_currency_converter
 from app.reports.excel_generator import ExcelReportGenerator
+from app.services.explanation_service import ExplanationService, get_explanation_service
 from app.reports.pdf_generator import PdfReportGenerator
 from app.repositories.estimate_repository import EstimateVersionRepository
 from app.services.project_service import ProjectService
@@ -216,14 +217,27 @@ def export_saved_version_excel(
     # second *body* field would force FastAPI to embed both under keys,
     # breaking that existing flat shape. A query param avoids that entirely.
     target_currency: str | None = Query(default=None),
+    # Default true (unlike the stateless /api/v1/reports/excel's opt-in
+    # false) - this is the route the "Export Excel" button actually calls,
+    # and ExplanationService falls back to template text with no error/cost
+    # when GROQ_API_KEY is unset, so defaulting on is safe either way.
+    include_ai_explanations: bool = Query(default=True),
     current_user: UserModel = Depends(get_current_user),
     service: ProjectService = Depends(get_project_service),
     currency_converter: CurrencyConverter = Depends(get_currency_converter),
+    explanation_service: ExplanationService = Depends(get_explanation_service),
 ):
     row = service.get_version(current_user, project_id, version)
     result = EstimateResult.model_validate(row.result_json)
+    if current_user.role != "admin":
+        # Audit log is an admin-only view - see _to_detail()'s stripping
+        # above. The Excel workbook has its own "Audit" sheet, so it needs
+        # the same treatment or a non-admin could get the trail via export
+        # even though the JSON API withholds it.
+        result = result.model_copy(update={"audit_log": result.audit_log.model_copy(update={"entries": []})})
     result = convert_estimate_currency(result, target_currency, currency_converter)
-    file_bytes = ExcelReportGenerator().generate(result, branding)
+    explanation = explanation_service.explain_estimate(result) if include_ai_explanations else None
+    file_bytes = ExcelReportGenerator().generate(result, branding, explanation)
     filename = f"project{project_id}_v{version}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
     return StreamingResponse(
         iter([file_bytes]),
@@ -241,14 +255,17 @@ def export_saved_version_pdf(
     version: int,
     branding: BrandingConfig = BrandingConfig(),
     target_currency: str | None = Query(default=None),
+    include_ai_explanations: bool = Query(default=True),
     current_user: UserModel = Depends(get_current_user),
     service: ProjectService = Depends(get_project_service),
     currency_converter: CurrencyConverter = Depends(get_currency_converter),
+    explanation_service: ExplanationService = Depends(get_explanation_service),
 ):
     row = service.get_version(current_user, project_id, version)
     result = EstimateResult.model_validate(row.result_json)
     result = convert_estimate_currency(result, target_currency, currency_converter)
-    file_bytes = PdfReportGenerator().generate(result, branding)
+    explanation = explanation_service.explain_estimate(result) if include_ai_explanations else None
+    file_bytes = PdfReportGenerator().generate(result, branding, explanation)
     filename = f"project{project_id}_v{version}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
     return StreamingResponse(
         iter([file_bytes]),

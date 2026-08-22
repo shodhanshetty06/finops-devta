@@ -77,6 +77,24 @@ def get_current_user(
     return user
 
 
+def get_current_user_optional(
+    token: str | None = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+) -> UserModel | None:
+    """Like `get_current_user`, but returns None instead of 401 when there's
+    no (or an invalid) token - for endpoints that work anonymously but still
+    need to know the caller's role *if* they're logged in (e.g. hiding the
+    admin-only audit log from the stateless report export)."""
+    if token is None:
+        return None
+    try:
+        payload = decode_access_token(token, settings)
+    except TokenError:
+        return None
+    return UserRepository(db).get_by_id(int(payload["sub"]))
+
+
 def require_roles(*roles: str):
     """Dependency factory: `Depends(require_roles("admin"))` restricts an
     endpoint to the given roles (in addition to requiring authentication)."""

@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 
+from app.domain.assumption import humanize_field_code
 from app.domain.branding import BrandingConfig
 from app.domain.estimate import EstimateResult
 from app.domain.explanation import EstimateExplanation
@@ -112,19 +113,28 @@ class ExcelReportGenerator:
             write_data_row(ws, row, [label, value, estimate.cost.currency], currency_cols={2})
             row += 1
 
+        # Customer-facing note about assumptions - deliberately does NOT
+        # surface validation/audit-log jargon here (blocker/warning counts,
+        # audit entry counts mean nothing to someone reading a price quote).
+        # Those stay available on their own "Validation"/"Audit" sheets for
+        # anyone who needs the technical detail; this sheet is pricing-first.
         row += 1
-        write_header_row(ws, row, ["Quality Indicator", "Count"], accent)
+        write_header_row(ws, row, ["What You Need to Know"], accent)
         row += 1
-        indicators = [
-            ("Validation Warnings", estimate.validation.warning_count),
-            ("Validation Blockers", estimate.validation.blocker_count),
-            ("Assumptions Made", len(estimate.assumptions)),
-            ("Architecture Components", len(estimate.architecture.components)),
-            ("Audit Log Entries", len(estimate.audit_log.entries)),
-        ]
-        for label, value in indicators:
-            write_data_row(ws, row, [label, value])
-            row += 1
+        if not estimate.assumptions:
+            note = "Every part of your requested configuration was available exactly as specified - no changes were needed."
+        else:
+            plural = "s" if len(estimate.assumptions) != 1 else ""
+            note = (
+                f"{len(estimate.assumptions)} part{plural} of your request could not be matched exactly and were "
+                f"adjusted to the nearest available Google Cloud option. See the 'Assumptions' sheet below for "
+                f"what changed and why, in plain language."
+            )
+        note_cell = ws.cell(row=row, column=1, value=note)
+        note_cell.alignment = Alignment(wrap_text=True, vertical="top")
+        ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
+        ws.row_dimensions[row].height = 30
+        row += 1
 
         if explanation is not None and explanation.executive_summary:
             row += 1
@@ -140,7 +150,7 @@ class ExcelReportGenerator:
         ws.cell(row=row, column=1, value=branding.footer_note).font = Font(italic=True, size=9, color="888888")
         ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=6)
 
-        autofit_columns(ws, widths={1: 28, 2: 40, 3: 12})
+        autofit_columns(ws, widths={1: 28, 2: 40, 3: 60})
         ws.sheet_view.showGridLines = False
 
     # -- Generic line-item sheet (Compute / Storage / Database / Networking) --
@@ -321,13 +331,18 @@ class ExcelReportGenerator:
         ws = wb.create_sheet("Assumptions")
         accent = branding.primary_color_hex
         write_title(ws, "Assumptions", accent, row=1)
-        write_subtitle(ws, "Every substitution made while normalizing the request to a valid Google Cloud configuration.", row=2)
+        write_subtitle(
+            ws,
+            "Anywhere your request couldn't be matched exactly, here's what we changed and why - in plain "
+            "language, not just the raw numbers.",
+            row=2,
+        )
 
         has_ai_column = (
             explanation is not None
             and len(explanation.assumption_explanations) == len(estimate.assumptions)
         )
-        headers = ["Field", "Requested Value", "Used Value", "Reason", "Strategy"]
+        headers = ["What Changed", "You Requested", "We Used", "Why"]
         if has_ai_column:
             headers.append("Customer-Friendly Explanation")
 
@@ -335,24 +350,24 @@ class ExcelReportGenerator:
         write_header_row(ws, header_row, headers, accent)
         row = header_row + 1
         if not estimate.assumptions:
-            no_assumptions_row = ["-", "-", "-", "No assumptions were necessary; every requested value was directly supported.", "-"]
+            no_assumptions_row = ["-", "-", "-", "No changes were necessary; every requested value was directly supported."]
             if has_ai_column:
                 no_assumptions_row.append("-")
             write_data_row(ws, row, no_assumptions_row)
             row += 1
         elif has_ai_column:
             for a, exp in zip(estimate.assumptions, explanation.assumption_explanations):
-                write_data_row(ws, row, [a.field, a.requested_value, a.used_value, a.reason, a.strategy_applied or "-", exp.explanation])
+                write_data_row(ws, row, [humanize_field_code(a.field), a.requested_value, a.used_value, a.reason, exp.explanation])
                 row += 1
         else:
             for a in estimate.assumptions:
-                write_data_row(ws, row, [a.field, a.requested_value, a.used_value, a.reason, a.strategy_applied or "-"])
+                write_data_row(ws, row, [humanize_field_code(a.field), a.requested_value, a.used_value, a.reason])
                 row += 1
 
         freeze_header(ws, header_row)
-        widths = {1: 24, 2: 24, 3: 30, 4: 60, 5: 16}
+        widths = {1: 26, 2: 24, 3: 30, 4: 60}
         if has_ai_column:
-            widths[6] = 60
+            widths[5] = 60
         autofit_columns(ws, widths=widths)
         ws.sheet_view.showGridLines = False
 

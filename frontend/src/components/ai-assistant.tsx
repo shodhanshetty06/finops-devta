@@ -4,6 +4,7 @@ import { Bot, Send, Sparkles, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useAssistantData } from "@/contexts/assistant-context";
 import { apiErrorMessage, assistantApi } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { useEscapeKey } from "@/hooks/use-dismiss";
@@ -24,19 +25,24 @@ const SUGGESTIONS = ["How do discounts work?", "What do validation severities me
 const WELCOME: Message = {
   id: "welcome",
   role: "assistant",
-  text: "Hi, I'm the FinOps Assistant, powered by Claude. Ask me about pricing, validation, normalization, architecture, or optimization on this platform.",
+  text: "Hi, I'm the FinOps Assistant, powered by Groq. Ask me about pricing, validation, normalization, architecture, or optimization on this platform - or about the estimate/comparison you currently have open.",
 };
 
 /** Floating help widget, bottom-right, mounted once in the app shell. Calls
  * POST /api/v1/assistant/chat (backend/app/api/routers/assistant.py), which
- * itself calls Claude with a system prompt grounded in this platform's real
- * documented behavior - see backend/app/services/assistant_service.py. */
+ * itself calls Groq with a system prompt grounded in this platform's real
+ * documented behavior - see backend/app/services/assistant_service.py.
+ * Also forwards whatever estimate/comparison the current page has registered
+ * via frontend/src/contexts/assistant-context.tsx, so questions about actual
+ * costs/assumptions/resources get grounded, real answers instead of "I don't
+ * have access to live pricing data". */
 export function AiAssistant() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([WELCOME]);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { estimate, comparison } = useAssistantData();
 
   useEscapeKey(open, () => setOpen(false));
 
@@ -59,7 +65,7 @@ export function AiAssistant() {
     setSending(true);
 
     try {
-      const { text: answer } = await assistantApi.chat(trimmed, history);
+      const { text: answer } = await assistantApi.chat(trimmed, history, { estimate, comparison });
       setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: "assistant", text: answer }]);
     } catch (error) {
       setMessages((prev) => [
@@ -87,7 +93,7 @@ export function AiAssistant() {
               </span>
               <div className="flex flex-col leading-tight">
                 <span className="text-sm font-semibold text-foreground">FinOps Assistant</span>
-                <span className="text-[11px] text-muted-foreground">Powered by Claude</span>
+                <span className="text-[11px] text-muted-foreground">Powered by Groq</span>
               </div>
             </div>
             <button

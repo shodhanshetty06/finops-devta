@@ -32,6 +32,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ValidationPanel } from "@/components/validation-panel";
+import { useSetAssistantComparison } from "@/contexts/assistant-context";
 import { useCurrency } from "@/contexts/currency-context";
 import { apiErrorMessage, catalogApi, estimateApi, optimizationApi, projectsApi } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
@@ -39,6 +40,7 @@ import type {
   CustomerRequirement,
   EstimateVersionDetail,
   GCPServiceDefinition,
+  ScenarioComparison,
   ScenarioRequest,
   ServiceSelection,
   ValidationReport,
@@ -373,6 +375,26 @@ function ResourceOptimizationContent() {
   const [isValidating, setIsValidating] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
   const [result, setResult] = useState<ComparisonResult | null>(null);
+
+  // Reshapes the already-computed ComparisonResult (see above - every figure
+  // in it already came from POST /api/v1/optimization/compare-scenarios) into
+  // the backend's ScenarioComparison shape so the FinOps Assistant widget can
+  // answer questions about this comparison - no number is recomputed here.
+  const assistantComparison = useMemo<ScenarioComparison | null>(() => {
+    if (!result) return null;
+    return {
+      base: { name: "Current", total_monthly: result.currentTotal, total_yearly: result.currentTotal * 12, currency: result.currency, delta_vs_base_monthly: 0, delta_vs_base_percent: 0 },
+      scenarios: [{
+        name: "Proposed",
+        total_monthly: result.proposedTotal,
+        total_yearly: result.proposedTotal * 12,
+        currency: result.currency,
+        delta_vs_base_monthly: result.totalMonthlyDiff,
+        delta_vs_base_percent: result.totalPercentChange,
+      }],
+    };
+  }, [result]);
+  useSetAssistantComparison(assistantComparison);
 
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: projectsApi.list });
 

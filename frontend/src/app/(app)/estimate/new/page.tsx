@@ -18,6 +18,7 @@ import { ValidationPanel } from "@/components/validation-panel";
 import { BasicsStep, NetworkStep, SizingStep, StorageStep } from "@/components/wizard/steps";
 import { useWizardState } from "@/components/wizard/use-wizard-state";
 import { useServiceSelection } from "@/components/wizard/use-service-selection";
+import { useSetAssistantEstimate } from "@/contexts/assistant-context";
 import { useCurrency } from "@/contexts/currency-context";
 import { apiErrorMessage, catalogApi, estimateApi } from "@/lib/api-client";
 import type { CustomerRequirement, EstimateResult, GCPServiceDefinition, ValidationReport } from "@/lib/types";
@@ -46,6 +47,7 @@ export default function NewEstimatePage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<EstimateResult | null>(null);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  useSetAssistantEstimate(result);
 
   // A project name is never required to price a workload - most people just
   // have requirements, not a project yet. If the Basics field is left

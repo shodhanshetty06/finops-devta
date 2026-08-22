@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
+import { useSetAssistantEstimate } from "@/contexts/assistant-context";
 import { useCurrency } from "@/contexts/currency-context";
 import { apiErrorMessage, downloadReport, estimateApi, intakeApi, reportsApi } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
@@ -78,6 +79,7 @@ export default function UploadExcelPage() {
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [response, setResponse] = useState<IntakeResponse | null>(null);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  useSetAssistantEstimate(response?.estimate ?? null);
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];

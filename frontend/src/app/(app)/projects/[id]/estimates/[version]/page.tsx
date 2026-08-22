@@ -10,6 +10,7 @@ import { ExportButtons } from "@/components/export-buttons";
 import { OptimizationPanel } from "@/components/finops/optimization-panel";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useSetAssistantEstimate } from "@/contexts/assistant-context";
 import { apiErrorMessage, projectsApi } from "@/lib/api-client";
 import { formatDate } from "@/lib/utils";
 
@@ -18,6 +19,7 @@ function EstimateDashboard({ projectId, version }: { projectId: number; version:
     queryKey: ["estimate-version", projectId, version],
     queryFn: () => projectsApi.getVersion(projectId, version),
   });
+  useSetAssistantEstimate(data?.result ?? null);
 
   if (isLoading) {
     return (

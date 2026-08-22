@@ -24,6 +24,20 @@ os.environ.setdefault("FINOPS_CELERY_RESULT_BACKEND", "cache+memory://")
 # (test_rate_limit.py) that explicitly re-enable it with a low limit.
 os.environ.setdefault("FINOPS_RATE_LIMIT_ENABLED", "false")
 
+# Never let a real GROQ_API_KEY/GROQ_MODEL that happens to be set in the
+# developer's local backend/.env (or CI environment) leak into the suite -
+# every test that goes through get_settings()/get_llm_provider() (e.g. any
+# TestClient(app) hitting /api/v1/explanations/* or /api/v1/assistant/chat)
+# must see Groq as unconfigured, exactly like a deployment with no key set,
+# so results never depend on whichever machine the suite runs on. Tests that
+# specifically want the "Groq configured" path construct their own
+# GroqProvider directly against a mocked transport instead (see
+# tests/test_explanation_service.py, tests/test_assistant_service.py,
+# tests/test_llm_groq_provider.py) - these are plain assignments, not
+# setdefault, so they always win over the .env file regardless of what's in it.
+os.environ["GROQ_API_KEY"] = ""
+os.environ["GROQ_MODEL"] = ""
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine

@@ -1,3 +1,7 @@
+import io
+
+from openpyxl import load_workbook
+
 from tests.conftest import register_and_login
 
 COMPUTE_REQUIREMENT = {
@@ -168,6 +172,36 @@ def test_audit_log_hidden_from_non_admins_but_visible_to_admins(api_client, db_s
     resp = api_client.get(f"/api/v1/projects/{project['id']}/estimates/1", headers=admin_headers)
     assert resp.status_code == 200
     assert len(resp.json()["result"]["audit_log"]["entries"]) > 0
+
+
+def test_excel_export_audit_sheet_hidden_from_non_admins_but_visible_to_admins(api_client, db_session):
+    _, owner_headers = register_and_login(api_client, "owner-k@example.com")
+    _, admin_headers = register_and_login(api_client, "admin3@example.com", role="admin", db_session=db_session)
+    project = api_client.post("/api/v1/projects", json={"name": "Audited Export Project"}, headers=owner_headers).json()
+    api_client.post(
+        f"/api/v1/projects/{project['id']}/estimates",
+        json={"requirement": COMPUTE_REQUIREMENT},
+        headers=owner_headers,
+    )
+
+    resp = api_client.post(
+        f"/api/v1/projects/{project['id']}/estimates/1/reports/excel",
+        json={"prepared_for": "Acme Co."},
+        headers=owner_headers,
+    )
+    assert resp.status_code == 200
+    ws = load_workbook(io.BytesIO(resp.content))["Audit"]
+    assert ws.max_row == 4  # title, subtitle, blank, header row - no entries
+    assert ws["A2"].value.startswith("0 recorded decisions")
+
+    resp = api_client.post(
+        f"/api/v1/projects/{project['id']}/estimates/1/reports/excel",
+        json={"prepared_for": "Acme Co."},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    ws = load_workbook(io.BytesIO(resp.content))["Audit"]
+    assert ws.max_row > 4
 
 
 def test_other_user_cannot_access_projects_estimates(api_client):

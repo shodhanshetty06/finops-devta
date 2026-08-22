@@ -24,6 +24,7 @@ import { ValidationPanel } from "@/components/validation-panel";
 import { NetworkStep, SizingStep, StorageStep } from "@/components/wizard/steps";
 import { emptyRequirement, useWizardState } from "@/components/wizard/use-wizard-state";
 import { useServiceSelection } from "@/components/wizard/use-service-selection";
+import { useSetAssistantEstimate } from "@/contexts/assistant-context";
 import { useCurrency } from "@/contexts/currency-context";
 import { apiErrorMessage, catalogApi, estimateApi, projectsApi } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
@@ -96,6 +97,7 @@ function ExistingEstimateContent() {
   const [updated, setUpdated] = useState<EstimateVersionDetail | null>(null);
   const [quickResult, setQuickResult] = useState<EstimateResult | null>(null);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  useSetAssistantEstimate(quickResult ?? updated?.result ?? null);
 
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: projectsApi.list });
 

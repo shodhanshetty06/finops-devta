@@ -294,11 +294,26 @@ export const intakeApi = {
       .then((r) => r.data),
 };
 
-// -- AI assistant chat (Phase 11) ------------------------------------------
+// -- AI assistant chat (Phase 11, Groq) --------------------------------------
 
 export const assistantApi = {
-  chat: (message: string, history: AssistantMessagePayload[]) =>
-    http.post<AssistantChatResponse>("/api/v1/assistant/chat", { message, history }).then((r) => r.data),
+  // `estimate`/`comparison` - whatever already-computed EstimateResult /
+  // ScenarioComparison the caller currently has on screen (see
+  // frontend/src/contexts/assistant-context.tsx) - are forwarded verbatim so
+  // the backend can ground its answer in real figures instead of guessing.
+  chat: (
+    message: string,
+    history: AssistantMessagePayload[],
+    context?: { estimate?: EstimateResult | null; comparison?: ScenarioComparison | null },
+  ) =>
+    http
+      .post<AssistantChatResponse>("/api/v1/assistant/chat", {
+        message,
+        history,
+        estimate: context?.estimate ?? null,
+        comparison: context?.comparison ?? null,
+      })
+      .then((r) => r.data),
 };
 
 // -- Reports (stateless - renders an EstimateResult that isn't saved to a

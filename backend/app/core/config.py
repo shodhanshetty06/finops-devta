@@ -175,27 +175,25 @@ class Settings(BaseSettings):
     # deployment never needs to put a raw secret value directly in an env var.
     jwt_secret_key_file: str | None = None
 
-    # -- AI Assistant (Phase 11) -------------------------------------------
-    # Backs the floating chat widget (frontend/src/components/ai-assistant.tsx)
-    # with a real Claude call instead of the local keyword-matched FAQ it
-    # previously used. Unset by default - the endpoint returns 503 rather
-    # than silently falling back to a canned answer, so the frontend can
-    # tell "not configured" apart from "the model call failed" and show the
-    # user something honest either way.
-    anthropic_api_key: str | None = None
-    assistant_model: str = "claude-opus-5"
-
-    # -- LLM-assisted explanations (Groq) ---------------------------------------
-    # Generates customer-friendly, plain-English explanations of normalization
-    # assumptions, priced resources, and upgrade/downgrade cost comparisons for
-    # the estimate/report flow (app/services/explanation_service.py). Purely
-    # explanatory: Groq never calculates a price, selects a SKU, chooses a
-    # currency, or validates anything - the deterministic pricing/normalization/
-    # validation engines remain the single source of truth for every number and
-    # configuration value it is given to explain. Unset by default; every
-    # endpoint that uses this falls back to deterministic template text (never
-    # an error) when it's unset, times out, or the call fails, exactly like the
-    # currency converter's stale-cache fallback above.
+    # -- LLM-assisted explanations + AI Assistant (Groq) ------------------------
+    # Both AI-touching features on this platform share this one Groq
+    # configuration:
+    #   - Customer-friendly, plain-English explanations of normalization
+    #     assumptions, priced resources, and upgrade/downgrade cost comparisons
+    #     for the estimate/report flow (app/services/explanation_service.py,
+    #     POST /api/v1/explanations/*, and Excel/PDF report generation via
+    #     ReportRequest.include_ai_explanations).
+    #   - The floating chat widget (frontend/src/components/ai-assistant.tsx,
+    #     POST /api/v1/assistant/chat) via app/services/assistant_service.py.
+    # Purely explanatory in both cases: Groq never calculates a price, selects
+    # a SKU, chooses a currency, or validates anything - the deterministic
+    # pricing/normalization/validation engines remain the single source of
+    # truth for every number and configuration value it is given to explain.
+    # Unset by default; the explanation/report flow falls back to
+    # deterministic template text (never an error) when it's unset, times
+    # out, or the call fails - the assistant chat instead returns 503, so the
+    # frontend can tell "not configured" apart from "the model call failed"
+    # and show the user something honest either way.
     #
     # Deliberately named without the FINOPS_ prefix (validation_alias below) so
     # the required env var names match GROQ_API_KEY / GROQ_MODEL exactly, e.g.

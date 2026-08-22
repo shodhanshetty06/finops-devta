@@ -55,6 +55,14 @@ value; change or second-guess a configuration, price, or currency; state a \
 number that does not appear in the input; add caveats implying the \
 figures might be wrong. Only use the exact values given to you.
 
+Never use internal engineering terminology in your explanation text - not \
+"normalization", "fallback", "strategy", "conservative/balanced/performance \
+strategy", "blocker", "validation", or similarly technical words, even \
+though the input JSON itself uses them (a field like strategy_applied is \
+context for you, not vocabulary to repeat). Describe a substitution in plain \
+terms instead, e.g. "we used the closest available configuration" rather \
+than naming which strategy picked it.
+
 For an item that explains a configuration assumption, follow this \
 structure in your explanation: (1) what the customer requested, (2) why it \
 is not available/valid as requested, (3) what configuration was assumed \

@@ -1,11 +1,15 @@
 import io
+import json
 
+import httpx
 import pytest
 from openpyxl import load_workbook
 
 from app.domain.branding import BrandingConfig
+from app.llm.groq_provider import GroqProvider
 from app.reports.excel_generator import ExcelReportGenerator
 from app.reports.pdf_generator import PdfReportGenerator
+from app.services.explanation_service import ExplanationService
 
 pypdf = pytest.importorskip("pypdf")
 
@@ -79,29 +83,42 @@ def test_pdf_report_is_valid_and_contains_key_sections(sample_estimate):
     assert pbytes[:5] == b"%PDF-"
 
     reader = pypdf.PdfReader(io.BytesIO(pbytes))
-    assert len(reader.pages) >= 4
-    text = "\n".join(p.extract_text() for p in reader.pages)
+    # The consolidated layout (Selected Resources + Category Totals +
+    # Itemized Pricing merged into one Cost Breakdown table, no forced
+    # PageBreaks) should keep even a multi-category, multi-assumption
+    # estimate to a handful of pages rather than the old fixed ~7-page
+    # skeleton every estimate used to produce regardless of content.
+    assert 1 <= len(reader.pages) <= 5
+    # Cell text now wraps (Paragraph flowables), so pypdf can insert a
+    # newline mid-phrase where a cell wrapped - normalize before checking
+    # for an exact multi-word phrase.
+    text = " ".join(p.extract_text() for p in reader.pages).replace("\n", " ")
 
     for expected in [
         sample_estimate.project_name,
         "Executive Summary",
         "Recommended Architecture",
-        "Itemized Pricing",
         "Cost Breakdown",
-        "Assumptions",
-        "Validation Results",
-        "Savings Opportunities",
+        "Category Totals",
         "Totals",
+        "Assumptions",
+        "Configuration Review",
+        "Savings Opportunities",
         "Approval",
         f"{sample_estimate.cost.total_monthly:,.2f}",
     ]:
         assert expected in text, f"Expected '{expected}' in PDF text"
 
+    # The old separate "Itemized Pricing" table (raw line items) was merged
+    # into the Cost Breakdown table above - it must not still appear as its
+    # own duplicate section.
+    assert "Itemized Pricing" not in text
+
 
 def test_pdf_report_lists_every_architecture_component(sample_estimate):
     pbytes = PdfReportGenerator().generate(sample_estimate)
     reader = pypdf.PdfReader(io.BytesIO(pbytes))
-    text = "\n".join(p.extract_text() for p in reader.pages)
+    text = " ".join(p.extract_text() for p in reader.pages).replace("\n", " ")
     for component in sample_estimate.architecture.components:
         assert component.service in text
 
@@ -141,12 +158,90 @@ def test_excel_resources_sheet_lists_every_resource_with_full_columns(sample_est
     assert "Grand Total" in all_values
 
 
-def test_pdf_resources_section_shows_category_status_and_category_totals(sample_estimate):
-    pbytes = PdfReportGenerator().generate(sample_estimate)
+# -- Groq-generated explanations merged into the Excel/PDF report -----------
+# Exercises the full "Excel Upload -> ... -> Groq explanation -> Excel/PDF"
+# flow's report-generation half: an EstimateExplanation (produced by
+# ExplanationService, backed by a mocked Groq call) is passed through to
+# both generators exactly as POST /api/v1/reports/excel|pdf does when
+# ReportRequest.include_ai_explanations=true (see
+# app/api/routers/reports.py::_maybe_explain).
+
+def _groq_explanation_for(estimate) -> "ExplanationService":
+    n = len(estimate.assumptions)
+    items = [{"id": i, "explanation": f"Plain-English reason #{i}."} for i in range(n)]
+    items += [
+        {"id": n + i, "explanation": f"Resource explanation #{i}."}
+        for i in range(len(estimate.cost.resource_summaries))
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = {"executive_summary": "This estimate is ready for review.", "items": items}
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(body)}}]})
+
+    provider = GroqProvider("test-key", "llama-3.1-8b-instant", transport=httpx.MockTransport(handler))
+    return ExplanationService(provider=provider, model="llama-3.1-8b-instant")
+
+
+def test_excel_report_embeds_groq_explanations_alongside_deterministic_reasons(sample_estimate):
+    explanation = _groq_explanation_for(sample_estimate).explain_estimate(sample_estimate)
+    assert explanation.summary_source == "llm"
+
+    xbytes = ExcelReportGenerator().generate(sample_estimate, BrandingConfig(), explanation)
+    wb = load_workbook(io.BytesIO(xbytes))
+
+    # Executive summary sheet carries the AI-generated summary...
+    summary_values = [cell.value for row in wb["Summary"].iter_rows() for cell in row]
+    assert explanation.executive_summary in summary_values
+
+    # ...and the Assumptions sheet keeps the original deterministic reason
+    # AND adds the customer-friendly explanation as an extra column - the
+    # deterministic engine's own text is never replaced, only supplemented.
+    ws = wb["Assumptions"]
+    header_row = [c.value for c in ws[4]]
+    assert "Customer-Friendly Explanation" in header_row
+    rows = list(ws.iter_rows(min_row=5, values_only=True))
+    reasons = {row[3] for row in rows if row[3]}
+    ai_explanations = {row[header_row.index("Customer-Friendly Explanation")] for row in rows}
+    for a in sample_estimate.assumptions:
+        assert a.reason in reasons
+    for exp in explanation.assumption_explanations:
+        assert exp.explanation in ai_explanations
+
+
+def test_pdf_report_embeds_groq_explanations(sample_estimate):
+    explanation = _groq_explanation_for(sample_estimate).explain_estimate(sample_estimate)
+
+    pbytes = PdfReportGenerator().generate(sample_estimate, BrandingConfig(), explanation)
     reader = pypdf.PdfReader(io.BytesIO(pbytes))
     text = "\n".join(p.extract_text() for p in reader.pages)
 
-    assert "Selected Resources" in text
+    assert "AI-Generated Summary" in text
+    assert explanation.executive_summary in text
+    for exp in explanation.assumption_explanations:
+        assert exp.explanation in text
+
+
+def test_reports_still_generate_when_groq_is_unconfigured(sample_estimate):
+    # No provider configured at all - ExplanationService.explain_estimate
+    # must still return a complete (template-sourced) explanation, and the
+    # reports must still render successfully. Pricing/report generation
+    # never breaks because Groq isn't available.
+    explanation = ExplanationService(provider=None, model=None).explain_estimate(sample_estimate)
+    assert explanation.summary_source == "template"
+
+    xbytes = ExcelReportGenerator().generate(sample_estimate, BrandingConfig(), explanation)
+    assert load_workbook(io.BytesIO(xbytes)).sheetnames  # opens without error
+
+    pbytes = PdfReportGenerator().generate(sample_estimate, BrandingConfig(), explanation)
+    assert pbytes[:5] == b"%PDF-"
+
+
+def test_pdf_resources_section_shows_category_status_and_category_totals(sample_estimate):
+    pbytes = PdfReportGenerator().generate(sample_estimate)
+    reader = pypdf.PdfReader(io.BytesIO(pbytes))
+    text = " ".join(p.extract_text() for p in reader.pages).replace("\n", " ")
+
+    assert "Cost Breakdown" in text
     assert "Category Totals" in text
     for s in sample_estimate.cost.resource_summaries:
         assert s.resource_name in text

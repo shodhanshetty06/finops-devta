@@ -19,4 +19,3 @@ google-auth==2.36.0
 requests==2.33.0
 redis==5.2.1
 celery==5.4.0
-anthropic==0.122.0

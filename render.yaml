@@ -33,13 +33,14 @@ services:
         sync: false # e.g. ["https://your-app.vercel.app"]
       - key: FINOPS_GCP_SERVICE_ACCOUNT_JSON
         sync: false # path to a mounted Render Secret File, e.g. /etc/secrets/gcp-service-account.json
-      # -- LLM-assisted explanations (Groq) - optional, no FINOPS_ prefix --
-      # Both unset by default: /api/v1/explanations/* and report exports with
-      # include_ai_explanations=true fall back to deterministic template text
-      # automatically when either is missing, so the app boots and prices
-      # estimates normally either way. Paste real values as Render dashboard
-      # secrets (Environment tab) rather than committing them here.
+      # -- Groq (explanations + AI assistant chat) - optional, no FINOPS_ prefix --
+      # Shared by two features: /api/v1/explanations/* + report exports with
+      # include_ai_explanations=true (falls back to deterministic template
+      # text automatically when either var is missing, so the app boots and
+      # prices estimates normally either way), and /api/v1/assistant/chat
+      # (returns 503 when unset instead). Paste real values as Render
+      # dashboard secrets (Environment tab) rather than committing them here.
       - key: GROQ_API_KEY
         sync: false # paste your Groq API key here (https://console.groq.com/keys)
       - key: GROQ_MODEL
-        sync: false # e.g. llama-3.3-70b-versatile
+        sync: false # e.g. openai/gpt-oss-20b (Groq retires older models over time - see https://console.groq.com/docs/models)
