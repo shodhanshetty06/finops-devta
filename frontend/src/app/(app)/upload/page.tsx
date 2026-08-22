@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
-import { apiErrorMessage, downloadReport, intakeApi, reportsApi } from "@/lib/api-client";
+import { apiErrorMessage, downloadReport, estimateApi, intakeApi, reportsApi } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import type { EstimateResult, IntakeResponse, ParseIssue } from "@/lib/types";
 
@@ -68,12 +68,16 @@ export default function UploadExcelPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [autoEstimate, setAutoEstimate] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [isPricing, setIsPricing] = useState(false);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [response, setResponse] = useState<IntakeResponse | null>(null);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    setSelectedFileName(file.name);
+    setResponse(null);
     setIsUploading(true);
     try {
       const result = await intakeApi.uploadExcel(file, autoEstimate);
@@ -84,6 +88,26 @@ export default function UploadExcelPage() {
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function handleRemoveFile() {
+    setSelectedFileName(null);
+    setResponse(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  async function handlePriceNow(force: boolean) {
+    if (!response?.requirement) return;
+    setIsPricing(true);
+    try {
+      const estimate = await estimateApi.create(response.requirement, { force });
+      setResponse((prev) => (prev ? { ...prev, estimate } : prev));
+      toast.success("Priced successfully");
+    } catch (err) {
+      toast.error("Could not price this requirement", { description: apiErrorMessage(err) });
+    } finally {
+      setIsPricing(false);
     }
   }
 
@@ -120,17 +144,36 @@ export default function UploadExcelPage() {
             Automatically price the result once parsed
           </label>
 
-          <label
-            className={cn(
-              "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border-strong px-6 py-10 text-center transition-colors hover:border-primary-300 hover:bg-muted/40",
-              isUploading && "pointer-events-none opacity-60",
-            )}
-          >
-            {isUploading ? <Spinner className="h-6 w-6 text-muted-foreground" /> : <UploadIcon className="h-6 w-6 text-muted-foreground" />}
-            <span className="text-sm font-medium text-foreground">{isUploading ? "Processing..." : "Click to choose a .xlsx file"}</span>
-            <span className="text-xs text-muted-foreground">or drag and drop</span>
-            <input ref={fileInputRef} type="file" accept=".xlsx" onChange={handleFileChange} disabled={isUploading} className="hidden" />
-          </label>
+          {selectedFileName ? (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border-strong px-4 py-3">
+              <div className="flex min-w-0 items-center gap-2 text-sm text-foreground">
+                {isUploading ? <Spinner className="h-4 w-4 shrink-0" /> : <FileSpreadsheet className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                <span className="truncate font-medium">{selectedFileName}</span>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <label className={cn("cursor-pointer", isUploading && "pointer-events-none opacity-60")}>
+                  <span className="px-2 text-sm font-medium text-primary-600 hover:underline">Replace</span>
+                  <input ref={fileInputRef} type="file" accept=".xlsx" onChange={handleFileChange} disabled={isUploading} className="hidden" />
+                </label>
+                <Button type="button" variant="ghost" size="sm" onClick={handleRemoveFile} disabled={isUploading}>
+                  <XCircle className="h-4 w-4" />
+                  Remove
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <label
+              className={cn(
+                "flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border-strong px-6 py-10 text-center transition-colors hover:border-primary-300 hover:bg-muted/40",
+                isUploading && "pointer-events-none opacity-60",
+              )}
+            >
+              {isUploading ? <Spinner className="h-6 w-6 text-muted-foreground" /> : <UploadIcon className="h-6 w-6 text-muted-foreground" />}
+              <span className="text-sm font-medium text-foreground">{isUploading ? "Processing..." : "Click to choose a .xlsx file"}</span>
+              <span className="text-xs text-muted-foreground">or drag and drop</span>
+              <input ref={fileInputRef} type="file" accept=".xlsx" onChange={handleFileChange} disabled={isUploading} className="hidden" />
+            </label>
+          )}
         </CardContent>
       </Card>
 
@@ -194,19 +237,32 @@ export default function UploadExcelPage() {
               )}
             </>
           ) : (
-            response.requirement && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Parsed requirement</CardTitle>
-                  <CardDescription>Auto-pricing was off, or blockers prevented pricing - review the parsed data above.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <pre className="overflow-x-auto rounded-md bg-muted p-4 text-xs text-foreground">
-                    {JSON.stringify(response.requirement, null, 2)}
-                  </pre>
-                </CardContent>
-              </Card>
-            )
+            response.requirement && (() => {
+              const hasBlockers = response.issues.some((issue) => issue.severity === "blocker");
+              return (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Parsed requirement</CardTitle>
+                    <CardDescription>
+                      {hasBlockers
+                        ? "Pricing was blocked by the issue(s) marked above. Resolve them and re-upload, or force a price anyway."
+                        : "Automatic pricing was off for this upload. Review the parsed data below, then price it whenever you're ready."}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="flex flex-col gap-4">
+                    <div>
+                      <Button size="sm" onClick={() => handlePriceNow(hasBlockers)} disabled={isPricing}>
+                        {isPricing ? <Spinner /> : null}
+                        {hasBlockers ? "Force price anyway" : "Price this now"}
+                      </Button>
+                    </div>
+                    <pre className="overflow-x-auto rounded-md bg-muted p-4 text-xs text-foreground">
+                      {JSON.stringify(response.requirement, null, 2)}
+                    </pre>
+                  </CardContent>
+                </Card>
+              );
+            })()
           )}
         </>
       )}

@@ -30,6 +30,7 @@ from reportlab.platypus import (
 
 from app.domain.branding import BrandingConfig
 from app.domain.estimate import EstimateResult
+from app.domain.explanation import EstimateExplanation
 
 SEVERITY_COLORS = {
     "blocker": colors.HexColor("#D93025"),
@@ -39,7 +40,10 @@ SEVERITY_COLORS = {
 
 
 class PdfReportGenerator:
-    def generate(self, estimate: EstimateResult, branding: BrandingConfig | None = None) -> bytes:
+    def generate(
+        self, estimate: EstimateResult, branding: BrandingConfig | None = None,
+        explanation: EstimateExplanation | None = None,
+    ) -> bytes:
         branding = branding or BrandingConfig()
         accent = colors.HexColor(f"#{branding.primary_color_hex}")
         styles = self._build_styles(accent)
@@ -53,7 +57,7 @@ class PdfReportGenerator:
         )
 
         story = []
-        story += self._cover_and_executive_summary(estimate, branding, styles, accent)
+        story += self._cover_and_executive_summary(estimate, branding, styles, accent, explanation)
         story.append(PageBreak())
         story += self._architecture_section(estimate, styles, accent)
         story.append(Spacer(1, 12))
@@ -63,7 +67,7 @@ class PdfReportGenerator:
         story.append(PageBreak())
         story += self._charts_section(estimate, styles, accent)
         story.append(Spacer(1, 12))
-        story += self._assumptions_section(estimate, styles, accent)
+        story += self._assumptions_section(estimate, styles, accent, explanation)
         story.append(PageBreak())
         story += self._validation_section(estimate, styles, accent)
         story.append(Spacer(1, 12))
@@ -100,7 +104,10 @@ class PdfReportGenerator:
 
     # -- sections ------------------------------------------------------------
 
-    def _cover_and_executive_summary(self, estimate: EstimateResult, branding: BrandingConfig, styles, accent):
+    def _cover_and_executive_summary(
+        self, estimate: EstimateResult, branding: BrandingConfig, styles, accent,
+        explanation: EstimateExplanation | None = None,
+    ):
         flow = []
         flow.append(Spacer(1, 40))
         flow.append(Paragraph(branding.company_name, styles["CoverTitle"]))
@@ -160,6 +167,11 @@ class PdfReportGenerator:
             ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
         ]))
         flow.append(metric_table)
+
+        if explanation is not None and explanation.executive_summary:
+            flow.append(Spacer(1, 16))
+            flow.append(Paragraph("AI-Generated Summary", styles["H2Accent"]))
+            flow.append(Paragraph(explanation.executive_summary, styles["BodyText"]))
         return flow
 
     def _architecture_section(self, estimate: EstimateResult, styles, accent):
@@ -271,15 +283,32 @@ class PdfReportGenerator:
         flow.append(bar_drawing)
         return flow
 
-    def _assumptions_section(self, estimate: EstimateResult, styles, accent):
+    def _assumptions_section(
+        self, estimate: EstimateResult, styles, accent, explanation: EstimateExplanation | None = None,
+    ):
         flow = [Paragraph("Assumptions", styles["H1Accent"])]
         if not estimate.assumptions:
             flow.append(Paragraph("No assumptions were necessary; every requested value was directly supported.", styles["BodyText"]))
             return flow
-        rows = [["Field", "Requested", "Used", "Reason"]]
-        for a in estimate.assumptions:
-            rows.append([a.field, a.requested_value, a.used_value, Paragraph(a.reason, styles["BodySmall"])])
-        table = Table(rows, colWidths=[3 * cm, 3 * cm, 3.5 * cm, 6.5 * cm], repeatRows=1)
+
+        has_ai_column = (
+            explanation is not None
+            and len(explanation.assumption_explanations) == len(estimate.assumptions)
+        )
+        if has_ai_column:
+            rows = [["Field", "Requested", "Used", "Reason", "Customer-Friendly Explanation"]]
+            for a, exp in zip(estimate.assumptions, explanation.assumption_explanations):
+                rows.append([
+                    a.field, a.requested_value, a.used_value,
+                    Paragraph(a.reason, styles["BodySmall"]),
+                    Paragraph(exp.explanation, styles["BodySmall"]),
+                ])
+            table = Table(rows, colWidths=[2.3 * cm, 2.3 * cm, 2.7 * cm, 4.6 * cm, 4.6 * cm], repeatRows=1)
+        else:
+            rows = [["Field", "Requested", "Used", "Reason"]]
+            for a in estimate.assumptions:
+                rows.append([a.field, a.requested_value, a.used_value, Paragraph(a.reason, styles["BodySmall"])])
+            table = Table(rows, colWidths=[3 * cm, 3 * cm, 3.5 * cm, 6.5 * cm], repeatRows=1)
         table.setStyle(self._table_style(accent))
         flow.append(table)
         return flow

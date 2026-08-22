@@ -12,3 +12,11 @@ from app.domain.estimate import EstimateResult
 class ReportRequest(BaseModel):
     estimate: EstimateResult
     branding: BrandingConfig = BrandingConfig()
+    # Opt-in (default off, so existing callers/tests see byte-for-byte the
+    # same report unless they ask for this): when true, calls
+    # ExplanationService to add customer-friendly, plain-English
+    # explanations of the estimate's assumptions and an AI executive
+    # summary to the generated report. Falls back to the report's existing
+    # deterministic text if Groq isn't configured or the call fails - see
+    # app/services/explanation_service.py.
+    include_ai_explanations: bool = False

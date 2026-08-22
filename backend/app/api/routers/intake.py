@@ -14,14 +14,33 @@ from fastapi.responses import StreamingResponse
 
 from app.api.dependencies import get_estimation_service
 from app.core.config import Settings, get_settings
+from app.core.exceptions import ValidationFailedError
 from app.core.uploads import read_upload_bounded
-from app.domain.intake import IntakeResponse, TextIntakeRequest
+from app.domain.intake import IntakeResponse, ParseIssue, TextIntakeRequest
 from app.intake.excel_parser import ExcelQuestionnaireParser
 from app.intake.excel_template import ExcelTemplateGenerator
 from app.intake.text_extractor import NaturalLanguageRequirementExtractor
 from app.services.estimation_service import EstimationService
 
 router = APIRouter(prefix="/api/v1/intake", tags=["Intake"])
+
+
+def _try_auto_estimate(
+    estimation_service: EstimationService, requirement, issues: list[ParseIssue],
+    *, force: bool, commitment_term_years: int,
+):
+    """Run the pricing pipeline and fold any blocking validation issues back
+    into `issues` instead of raising - so a blocked auto-estimate still
+    returns the parsed requirement and an explanation, rather than losing
+    everything the parser already recovered."""
+    try:
+        return estimation_service.generate_estimate(requirement, force=force, commitment_term_years=commitment_term_years)
+    except ValidationFailedError as exc:
+        issues.extend(
+            ParseIssue(field=r.field, message=r.reason, severity=r.severity)
+            for r in exc.results if r.severity == "blocker"
+        )
+        return None
 
 
 @router.get("/excel/template", summary="Download a blank Excel requirements questionnaire")
@@ -57,7 +76,9 @@ async def upload_excel_questionnaire(
 
     estimate = None
     if auto_estimate and requirement is not None:
-        estimate = estimation_service.generate_estimate(requirement, force=force, commitment_term_years=commitment_term_years)
+        estimate = _try_auto_estimate(
+            estimation_service, requirement, issues, force=force, commitment_term_years=commitment_term_years,
+        )
 
     return IntakeResponse(requirement=requirement, issues=issues, estimate=estimate)
 
@@ -81,8 +102,11 @@ def extract_from_text(
 ):
     requirement, notes = NaturalLanguageRequirementExtractor().extract(body.project_name, body.text, body.region_hint)
 
+    issues: list[ParseIssue] = []
     estimate = None
     if auto_estimate:
-        estimate = estimation_service.generate_estimate(requirement, force=force, commitment_term_years=commitment_term_years)
+        estimate = _try_auto_estimate(
+            estimation_service, requirement, issues, force=force, commitment_term_years=commitment_term_years,
+        )
 
-    return IntakeResponse(requirement=requirement, notes=notes, estimate=estimate)
+    return IntakeResponse(requirement=requirement, issues=issues, notes=notes, estimate=estimate)

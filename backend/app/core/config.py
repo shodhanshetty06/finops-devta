@@ -162,7 +162,7 @@ class Settings(BaseSettings):
     rate_limit_heavy_requests_per_minute: int = Field(default=20, gt=0)
     rate_limit_heavy_path_prefixes: list[str] = [
         "/api/v1/estimate", "/api/v1/reports", "/api/v1/jobs", "/api/v1/intake", "/api/v1/auth/login",
-        "/api/v1/assistant",
+        "/api/v1/assistant", "/api/v1/explanations",
     ]
 
     # -- Request logging (Phase 7) ---------------------------------------------
@@ -184,6 +184,24 @@ class Settings(BaseSettings):
     # user something honest either way.
     anthropic_api_key: str | None = None
     assistant_model: str = "claude-opus-5"
+
+    # -- LLM-assisted explanations (Groq) ---------------------------------------
+    # Generates customer-friendly, plain-English explanations of normalization
+    # assumptions, priced resources, and upgrade/downgrade cost comparisons for
+    # the estimate/report flow (app/services/explanation_service.py). Purely
+    # explanatory: Groq never calculates a price, selects a SKU, chooses a
+    # currency, or validates anything - the deterministic pricing/normalization/
+    # validation engines remain the single source of truth for every number and
+    # configuration value it is given to explain. Unset by default; every
+    # endpoint that uses this falls back to deterministic template text (never
+    # an error) when it's unset, times out, or the call fails, exactly like the
+    # currency converter's stale-cache fallback above.
+    #
+    # Deliberately named without the FINOPS_ prefix (validation_alias below) so
+    # the required env var names match GROQ_API_KEY / GROQ_MODEL exactly, e.g.
+    # for parity with how the Groq docs/dashboard refer to them.
+    groq_api_key: str | None = Field(default=None, validation_alias="GROQ_API_KEY")
+    groq_model: str | None = Field(default=None, validation_alias="GROQ_MODEL")
 
     # -- Audit log retention ---------------------------------------------------
     # Per-estimate audit trail rows (app/db/models.py::AuditLogRowModel) are
