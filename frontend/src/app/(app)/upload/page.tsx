@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Spinner } from "@/components/ui/spinner";
+import { useCurrency } from "@/contexts/currency-context";
 import { apiErrorMessage, downloadReport, estimateApi, intakeApi, reportsApi } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import type { EstimateResult, IntakeResponse, ParseIssue } from "@/lib/types";
@@ -35,6 +36,7 @@ function issueClasses(severity: ParseIssue["severity"]): string {
 
 function ExportEstimateButtons({ estimate }: { estimate: EstimateResult }) {
   const [downloading, setDownloading] = useState<"excel" | "pdf" | null>(null);
+  const { displayCurrency } = useCurrency();
 
   async function handleExport(kind: "excel" | "pdf") {
     setDownloading(kind);
@@ -42,7 +44,11 @@ function ExportEstimateButtons({ estimate }: { estimate: EstimateResult }) {
       const url = kind === "excel" ? reportsApi.exportExcelUrl() : reportsApi.exportPdfUrl();
       const ext = kind === "excel" ? "xlsx" : "pdf";
       const filename = `${estimate.project_name.replace(/[^a-zA-Z0-9]+/g, "_")}_estimate.${ext}`;
-      await downloadReport(url, filename, { estimate });
+      // Renders the report in whatever currency is currently selected on
+      // screen (see useCurrency()) - the backend converts every figure via
+      // CurrencyConverter.convert_estimate before rendering, or falls back
+      // to the estimate's native currency if a rate isn't available.
+      await downloadReport(url, filename, { estimate, target_currency: displayCurrency });
     } catch (err) {
       toast.error(`Could not export ${kind.toUpperCase()}`, { description: apiErrorMessage(err) });
     } finally {

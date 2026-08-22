@@ -208,7 +208,10 @@ class PdfReportGenerator:
             ])
             grand_total += s.subtotal
         rows.append(["", "", "", "", "", "Grand Total", f"{estimate.cost.currency} {grand_total:,.2f}"])
-        table = Table(rows, colWidths=[2.2 * cm, 2.8 * cm, 5.5 * cm, 1.2 * cm, 2.3 * cm, 2.3 * cm, 2.2 * cm], repeatRows=1)
+        # Column widths sum to 17.2cm - just under the 17.4cm usable A4 width
+        # (21cm page - 1.8cm left/right margins, see SimpleDocTemplate above).
+        # Previously summed to 18.5cm, overflowing the page by 1.1cm.
+        table = Table(rows, colWidths=[2.0 * cm, 2.6 * cm, 5.1 * cm, 1.1 * cm, 2.2 * cm, 2.2 * cm, 2.0 * cm], repeatRows=1)
         style = self._table_style(accent)
         style.add("ALIGN", (3, 1), (5, -1), "RIGHT")
         style.add("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold")

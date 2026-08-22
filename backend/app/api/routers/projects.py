@@ -36,6 +36,7 @@ from app.domain.project import (
 from app.domain.requirements import CustomerRequirement
 from app.intake.excel_parser import ExcelQuestionnaireParser
 from app.intake.text_extractor import NaturalLanguageRequirementExtractor
+from app.pricing.currency_converter import CurrencyConverter, convert_estimate_currency, get_currency_converter
 from app.reports.excel_generator import ExcelReportGenerator
 from app.reports.pdf_generator import PdfReportGenerator
 from app.repositories.estimate_repository import EstimateVersionRepository
@@ -208,11 +209,20 @@ def export_saved_version_excel(
     project_id: int,
     version: int,
     branding: BrandingConfig = BrandingConfig(),
+    # Explicit Query(), not a plain default, so this can't be mistaken for a
+    # second body parameter - `branding` is the sole body parameter today
+    # (the request body IS a BrandingConfig, unembedded - see
+    # tests/test_projects.py's json={"prepared_for": ...}), and adding a
+    # second *body* field would force FastAPI to embed both under keys,
+    # breaking that existing flat shape. A query param avoids that entirely.
+    target_currency: str | None = Query(default=None),
     current_user: UserModel = Depends(get_current_user),
     service: ProjectService = Depends(get_project_service),
+    currency_converter: CurrencyConverter = Depends(get_currency_converter),
 ):
     row = service.get_version(current_user, project_id, version)
     result = EstimateResult.model_validate(row.result_json)
+    result = convert_estimate_currency(result, target_currency, currency_converter)
     file_bytes = ExcelReportGenerator().generate(result, branding)
     filename = f"project{project_id}_v{version}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
     return StreamingResponse(
@@ -230,11 +240,14 @@ def export_saved_version_pdf(
     project_id: int,
     version: int,
     branding: BrandingConfig = BrandingConfig(),
+    target_currency: str | None = Query(default=None),
     current_user: UserModel = Depends(get_current_user),
     service: ProjectService = Depends(get_project_service),
+    currency_converter: CurrencyConverter = Depends(get_currency_converter),
 ):
     row = service.get_version(current_user, project_id, version)
     result = EstimateResult.model_validate(row.result_json)
+    result = convert_estimate_currency(result, target_currency, currency_converter)
     file_bytes = PdfReportGenerator().generate(result, branding)
     filename = f"project{project_id}_v{version}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.pdf"
     return StreamingResponse(

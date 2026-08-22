@@ -38,6 +38,7 @@ from functools import lru_cache
 import httpx
 
 from app.core.exceptions import CurrencyProviderError
+from app.domain.estimate import EstimateResult
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +252,87 @@ class CurrencyConverter:
         if rate is None:
             raise CurrencyProviderError(f"No exchange rate available for {from_currency} -> {to_currency}.")
         return round(amount * rate, 2), snapshot
+
+    def convert_estimate(self, estimate: EstimateResult, to_currency: str) -> EstimateResult:
+        """Rescales every monetary figure on an already-priced EstimateResult
+        into `to_currency` using a single fetched rate - the report-export
+        equivalent of the frontend's own display-currency conversion
+        (frontend/src/contexts/currency-context.tsx). Nothing is re-priced:
+        every figure is still exactly proportional to what the pricing
+        engine originally computed, just expressed in a different currency,
+        same as viewing the same estimate on screen in INR instead of USD.
+
+        Percentages (tax_rate_percent, support_plan_percent, a discount's
+        percent_off) are currency-independent and left untouched - only
+        absolute currency amounts are rescaled. Audit log entries are a
+        free-text historical record and are not rewritten to a different
+        currency; they keep the wording/figures of the currency the
+        estimate was actually priced and audited in.
+
+        Returns `estimate` unchanged (no rate fetch at all) when it's
+        already priced in `to_currency`. Raises CurrencyProviderError if no
+        rate is available - same failure mode as `convert()` - so callers
+        that must never fail a report download should catch it and fall
+        back to the estimate's native currency, exactly like
+        `convert_estimate_currency` below does for the report endpoints."""
+        from_currency = estimate.cost.currency
+        if from_currency == to_currency:
+            return estimate
+
+        snapshot = self.get_rates(from_currency)
+        rate = snapshot.rates.get(to_currency)
+        if rate is None:
+            raise CurrencyProviderError(f"No exchange rate available for {from_currency} -> {to_currency}.")
+
+        def scaled(value: float) -> float:
+            return round(value * rate, 2)
+
+        cost = estimate.cost
+        converted_cost = cost.model_copy(update={
+            "currency": to_currency,
+            "line_items": [
+                li.model_copy(update={"currency": to_currency, "unit_price": scaled(li.unit_price), "monthly_amount": scaled(li.monthly_amount)})
+                for li in cost.line_items
+            ],
+            "discounts": [d.model_copy(update={"monthly_savings": scaled(d.monthly_savings)}) for d in cost.discounts],
+            "resource_summaries": [
+                r.model_copy(update={"currency": to_currency, "unit_cost": scaled(r.unit_cost), "subtotal": scaled(r.subtotal)})
+                for r in cost.resource_summaries
+            ],
+            "category_totals": {category: scaled(total) for category, total in cost.category_totals.items()},
+            "subtotal_monthly": scaled(cost.subtotal_monthly),
+            "discount_total_monthly": scaled(cost.discount_total_monthly),
+            "tax_monthly": scaled(cost.tax_monthly),
+            "support_monthly": scaled(cost.support_monthly),
+            "total_monthly": scaled(cost.total_monthly),
+            "total_yearly": scaled(cost.total_yearly),
+            "total_three_year": scaled(cost.total_three_year),
+        })
+        return estimate.model_copy(update={"cost": converted_cost})
+
+
+def convert_estimate_currency(
+    estimate: EstimateResult, target_currency: str | None, converter: CurrencyConverter,
+) -> EstimateResult:
+    """Shared by every report export route (app/api/routers/reports.py and
+    projects.py): converts `estimate` into `target_currency` if given and
+    different from the estimate's native pricing currency, via
+    `CurrencyConverter.convert_estimate`. Returns `estimate` unchanged, with
+    a warning logged, if live/cached rates for that currency aren't
+    available - a currency-conversion hiccup must never block a report
+    download, same fallback-over-failure philosophy as the rest of this
+    module (get_rates() already falls back live -> stale cache; this is one
+    layer further out, falling back to "don't convert" as the last resort)."""
+    if not target_currency or target_currency == estimate.cost.currency:
+        return estimate
+    try:
+        return converter.convert_estimate(estimate, target_currency)
+    except CurrencyProviderError as exc:
+        logger.warning(
+            "convert_estimate_currency: could not convert to %s, exporting in the estimate's native "
+            "currency (%s) instead: %s", target_currency, estimate.cost.currency, exc,
+        )
+        return estimate
 
 
 @lru_cache

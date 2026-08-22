@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { useCurrency } from "@/contexts/currency-context";
 import { apiErrorMessage, downloadReport, projectsApi } from "@/lib/api-client";
 
 export function ExportButtons({
@@ -18,13 +19,21 @@ export function ExportButtons({
   projectName: string;
 }) {
   const [downloading, setDownloading] = useState<"excel" | "pdf" | null>(null);
+  const { displayCurrency } = useCurrency();
 
   async function handleExport(kind: "excel" | "pdf") {
     setDownloading(kind);
     try {
-      const url = kind === "excel" ? projectsApi.exportExcelUrl(projectId, version) : projectsApi.exportPdfUrl(projectId, version);
+      const url =
+        kind === "excel"
+          ? projectsApi.exportExcelUrl(projectId, version, displayCurrency)
+          : projectsApi.exportPdfUrl(projectId, version, displayCurrency);
       const ext = kind === "excel" ? "xlsx" : "pdf";
       const filename = `${projectName.replace(/[^a-zA-Z0-9]+/g, "_")}_v${version}.${ext}`;
+      // Renders the report in whatever currency is currently selected on
+      // screen (see useCurrency()) - the backend converts every figure via
+      // CurrencyConverter.convert_estimate before rendering, or falls back
+      // to the estimate's native currency if a rate isn't available.
       await downloadReport(url, filename);
     } catch (err) {
       toast.error(`Could not export ${kind.toUpperCase()}`, { description: apiErrorMessage(err) });

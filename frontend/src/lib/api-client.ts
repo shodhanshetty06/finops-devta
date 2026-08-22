@@ -188,8 +188,15 @@ export const projectsApi = {
       })
       .then((r) => r.data),
 
-  exportExcelUrl: (id: number, version: number) => `/api/v1/projects/${id}/estimates/${version}/reports/excel`,
-  exportPdfUrl: (id: number, version: number) => `/api/v1/projects/${id}/estimates/${version}/reports/pdf`,
+  // targetCurrency is sent as a query param (not the JSON body) because the
+  // backend route's body IS a BrandingConfig, unembedded - adding a second
+  // body field there would force FastAPI to nest it under keys and break
+  // that existing flat shape (see the Query() comment in
+  // backend/app/api/routers/projects.py).
+  exportExcelUrl: (id: number, version: number, targetCurrency?: string) =>
+    `/api/v1/projects/${id}/estimates/${version}/reports/excel${targetCurrency ? `?target_currency=${encodeURIComponent(targetCurrency)}` : ""}`,
+  exportPdfUrl: (id: number, version: number, targetCurrency?: string) =>
+    `/api/v1/projects/${id}/estimates/${version}/reports/pdf${targetCurrency ? `?target_currency=${encodeURIComponent(targetCurrency)}` : ""}`,
 
   compareVersions: (id: number, fromVersion: number, toVersion: number) =>
     http
