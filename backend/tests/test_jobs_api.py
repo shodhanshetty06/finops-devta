@@ -4,10 +4,13 @@ finished by the time `.delay()` returns - these tests exercise the full
 enqueue -> poll -> download contract even though nothing is actually
 queued in-process during the test run."""
 import base64
+import io
 
 from fastapi.testclient import TestClient
+from openpyxl import load_workbook
 
 from app.main import app
+from tests.conftest import register_and_login
 
 client = TestClient(app)
 
@@ -48,6 +51,27 @@ def test_report_job_status_then_download_excel():
     assert download_resp.status_code == 200
     assert download_resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     assert download_resp.content[:2] == b"PK"
+
+
+def test_report_job_excel_download_hides_audit_sheet_from_non_admins_but_shows_admins(api_client, db_session):
+    # Same admin-only Audit-sheet gating as the synchronous
+    # /api/v1/reports/excel and .../projects/.../reports/excel endpoints -
+    # this async job route must not be a backdoor around it.
+    _, admin_headers = register_and_login(api_client, "jobs-admin@example.com", role="admin", db_session=db_session)
+    estimate = _sample_estimate_json(api_client)
+
+    anon_job_id = api_client.post("/api/v1/jobs/reports", json={"estimate": estimate, "format": "excel"}).json()["job_id"]
+    anon_resp = api_client.get(f"/api/v1/jobs/{anon_job_id}/download")
+    assert anon_resp.status_code == 200
+    assert "Audit" not in load_workbook(io.BytesIO(anon_resp.content)).sheetnames
+
+    admin_job_id = api_client.post(
+        "/api/v1/jobs/reports", json={"estimate": estimate, "format": "excel"}, headers=admin_headers,
+    ).json()["job_id"]
+    admin_resp = api_client.get(f"/api/v1/jobs/{admin_job_id}/download")
+    assert admin_resp.status_code == 200
+    ws = load_workbook(io.BytesIO(admin_resp.content))["Audit"]
+    assert ws.max_row > 4
 
 
 def test_report_job_pdf_download():

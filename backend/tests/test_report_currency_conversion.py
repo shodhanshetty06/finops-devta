@@ -78,6 +78,49 @@ def test_convert_estimate_rescales_every_monetary_figure(sample_estimate):
     assert sample_estimate.cost.currency != "INR"
 
 
+def test_convert_estimate_rescales_currency_mentions_in_audit_log(sample_estimate):
+    # Regression test: the Audit sheet must never keep showing the native
+    # pricing currency (e.g. "128.40 USD/month") after the rest of the
+    # report has been converted to the target currency - that's the exact
+    # mixed-currency bug this rescaling exists to prevent.
+    native_currency = sample_estimate.cost.currency
+    assert any(native_currency in e.detail for e in sample_estimate.audit_log.entries)  # sanity
+
+    converter = _converter(lambda r: _frankfurter_response(rates={"INR": 80.0}))
+    converted = converter.convert_estimate(sample_estimate, "INR")
+
+    assert len(converted.audit_log.entries) == len(sample_estimate.audit_log.entries)
+    for original, conv in zip(sample_estimate.audit_log.entries, converted.audit_log.entries):
+        assert native_currency not in conv.detail
+        if native_currency in original.detail:
+            assert "INR" in conv.detail
+        else:
+            assert conv.detail == original.detail  # untouched entries stay byte-identical
+
+    # The pricing_lookup entry's rescaled amount matches the same rate/
+    # rounding used for every other figure on the converted estimate.
+    original_pricing_entry = next(e for e in sample_estimate.audit_log.entries if e.action == "pricing_lookup")
+    conv_pricing_entry = next(e for e in converted.audit_log.entries if e.action == "pricing_lookup")
+    original_amount = float(original_pricing_entry.detail.rsplit(":", 1)[-1].split()[0])
+    conv_amount = float(conv_pricing_entry.detail.rsplit(":", 1)[-1].split()[0])
+    assert conv_amount == round(original_amount * 80.0, 2)
+
+
+def test_convert_estimate_keeps_monthly_times_12_and_36_exact(sample_estimate):
+    # Regression test: total_yearly/total_three_year must always equal
+    # total_monthly * 12 / * 36 exactly, even after currency conversion.
+    # Scaling each of the three totals independently (round(value * rate, 2)
+    # for each) can double-round to a different cent than deriving yearly/
+    # 3-year from the already-converted monthly figure - e.g. rate=1.52
+    # against this fixture used to produce total_monthly=823.2 but
+    # total_yearly=9878.42 instead of the correct 9878.40.
+    converter = _converter(lambda r: _frankfurter_response(rates={"INR": 1.52}))
+    converted = converter.convert_estimate(sample_estimate, "INR")
+
+    assert converted.cost.total_yearly == round(converted.cost.total_monthly * 12, 2)
+    assert converted.cost.total_three_year == round(converted.cost.total_monthly * 36, 2)
+
+
 def test_convert_estimate_raises_when_no_rate_available(sample_estimate):
     converter = _converter(lambda r: _frankfurter_response(rates={"EUR": 0.9}))  # no INR
     with pytest.raises(CurrencyProviderError):
@@ -139,6 +182,25 @@ def test_reports_excel_endpoint_renders_in_target_currency(api_client, sample_es
     values = [cell.value for row in ws.iter_rows() for cell in row]
     assert "INR" in values
     assert round(sample_estimate.cost.total_monthly * 80.0, 2) in values
+
+
+def test_excel_audit_sheet_matches_target_currency(sample_estimate):
+    # ExcelReportGenerator itself (not the admin-gated /reports/excel
+    # endpoint, which omits the Audit sheet for non-admins) - exercises the
+    # actual Audit sheet rendering against a converted estimate.
+    from app.reports.excel_generator import ExcelReportGenerator
+
+    native_currency = sample_estimate.cost.currency
+    converter = _converter(lambda r: _frankfurter_response(rates={"INR": 80.0}))
+    converted = converter.convert_estimate(sample_estimate, "INR")
+
+    xbytes = ExcelReportGenerator().generate(converted, BrandingConfig(), include_audit=True)
+    wb = load_workbook(io.BytesIO(xbytes))
+    audit_text = " ".join(
+        str(cell.value) for row in wb["Audit"].iter_rows() for cell in row if cell.value is not None
+    )
+    assert native_currency not in audit_text
+    assert "INR" in audit_text
 
 
 def test_reports_pdf_endpoint_without_target_currency_stays_native(api_client, sample_estimate):

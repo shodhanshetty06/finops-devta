@@ -31,11 +31,33 @@ from app.reports.styles import (
     write_title,
 )
 
+# Layers the Architecture Engine emits (see app/domain/architecture.py's
+# ArchitectureComponent.layer docstring) that are advisory-only by design -
+# suggested best practice, never priced as a line item - as opposed to
+# layers like "Compute"/"Database"/"Networking" that correspond to what's
+# actually costed on the Resources/Pricing sheets.
+_ADVISORY_ONLY_LAYERS = {"monitoring", "security", "backup", "disaster recovery", "ci/cd", "logging"}
+
+
+def _pricing_source_display(source: str | None) -> tuple[str, str | None]:
+    """Maps a PricingProvider.source_name (e.g. "mock_catalog",
+    "gcp_cloud_billing_catalog_api") to a customer-facing label, plus an
+    "Estimate Type" note when the source is a mock/test catalog - so a
+    development estimate can never be mistaken for an official Google Cloud
+    quote."""
+    if not source:
+        return "Unknown", None
+    if "mock" in source.lower():
+        return "Mock Catalog", "Development/Test"
+    if "gcp" in source.lower() or "google" in source.lower():
+        return "Google Cloud Pricing Catalog", None
+    return source.replace("_", " ").title(), None
+
 
 class ExcelReportGenerator:
     def generate(
         self, estimate: EstimateResult, branding: BrandingConfig | None = None,
-        explanation: EstimateExplanation | None = None,
+        explanation: EstimateExplanation | None = None, include_audit: bool = True,
     ) -> bytes:
         branding = branding or BrandingConfig()
         wb = Workbook()
@@ -66,7 +88,8 @@ class ExcelReportGenerator:
         pricing_last_row = self._build_pricing(wb, estimate, branding)
         self._build_totals(wb, estimate, branding, pricing_last_row)
         self._build_yearly(wb, estimate, branding)
-        self._build_audit(wb, estimate, branding)
+        if include_audit:
+            self._build_audit(wb, estimate, branding)
 
         wb.active = 0
         buf = io.BytesIO()
@@ -85,17 +108,53 @@ class ExcelReportGenerator:
         write_title(ws, branding.company_name, accent, row=1)
         write_subtitle(ws, "Google Cloud FinOps Cost Estimate", row=2)
 
+        source = estimate.cost.line_items[0].source if estimate.cost.line_items else None
+        pricing_source_label, estimate_type = _pricing_source_display(source)
+
         row = 4
         meta = [
             ("Project", estimate.project_name),
             ("Estimate ID", estimate.estimate_id),
             ("Region", estimate.normalized_spec.region),
-            ("Normalization Strategy", estimate.strategy_used.capitalize()),
-            ("Prepared By", branding.prepared_by),
-            ("Prepared For", branding.prepared_for or "-"),
-            ("Generated", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")),
+            ("Pricing Source", pricing_source_label),
         ]
+        if estimate_type:
+            meta.append(("Estimate Type", estimate_type))
+        meta.append(("Prepared By", branding.prepared_by))
+        if branding.prepared_for:
+            meta.append(("Prepared For", branding.prepared_for))
+        meta.append(("Generated", datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")))
         for label, value in meta:
+            ws.cell(row=row, column=1, value=label).font = Font(bold=True)
+            ws.cell(row=row, column=2, value=value)
+            row += 1
+
+        # Compact executive status block - the headline numbers a reader
+        # actually wants (is this priced correctly? what's it cost?) without
+        # internal implementation detail like normalization strategy names
+        # or raw blocker/warning counts (those stay on the Validation sheet).
+        if estimate.validation.blocker_count:
+            validation_status = "✕ Validation blocked"
+        elif estimate.validation.warning_count:
+            validation_status = "⚠ Validation completed with warnings"
+        else:
+            validation_status = "✓ Validation Passed"
+        assumptions_status = (
+            "None"
+            if not estimate.assumptions
+            else f"{len(estimate.assumptions)} - see the Assumptions sheet for details"
+        )
+
+        row += 1
+        write_header_row(ws, row, ["Status"], accent)
+        row += 1
+        status_rows = [
+            ("Validation Status", validation_status),
+            ("Priced Resources", len(estimate.cost.resource_summaries)),
+            ("Suggested Architecture Components", len(estimate.architecture.components)),
+            ("Assumptions", assumptions_status),
+        ]
+        for label, value in status_rows:
             ws.cell(row=row, column=1, value=label).font = Font(bold=True)
             ws.cell(row=row, column=2, value=value)
             row += 1
@@ -105,7 +164,7 @@ class ExcelReportGenerator:
         row += 1
         metrics = [
             ("Monthly Cost", estimate.cost.total_monthly),
-            ("Yearly Cost", estimate.cost.total_yearly),
+            ("Annual Cost", estimate.cost.total_yearly),
             ("3-Year Cost", estimate.cost.total_three_year),
             ("Monthly Discounts Applied", estimate.cost.discount_total_monthly),
         ]
@@ -187,7 +246,7 @@ class ExcelReportGenerator:
         if items:
             total_row = row
             ws.cell(row=total_row, column=1, value="Subtotal").font = Font(bold=True)
-            total_cell = ws.cell(row=total_row, column=6, value=f"=SUM(F{first_data_row}:F{row - 1})")
+            total_cell = ws.cell(row=total_row, column=6, value=f"=ROUND(SUM(F{first_data_row}:F{row - 1}),2)")
             total_cell.font = Font(bold=True)
             total_cell.number_format = "#,##0.00"
             for col in range(1, 8):
@@ -243,7 +302,7 @@ class ExcelReportGenerator:
         if summaries:
             total_row = row
             ws.cell(row=total_row, column=1, value="Grand Total").font = Font(bold=True)
-            total_cell = ws.cell(row=total_row, column=7, value=f"=SUM(G{first_data_row}:G{row - 1})")
+            total_cell = ws.cell(row=total_row, column=7, value=f"=ROUND(SUM(G{first_data_row}:G{row - 1}),2)")
             total_cell.font = Font(bold=True)
             total_cell.number_format = "#,##0.00"
             for col in range(1, len(headers) + 1):
@@ -267,7 +326,7 @@ class ExcelReportGenerator:
             ws.cell(row=cat_total_row, column=1, value="Sum of Category Totals").font = Font(bold=True)
             cat_total_cell = ws.cell(
                 row=cat_total_row, column=2,
-                value=f"=SUM(B{cat_first_row}:B{row - 1})",
+                value=f"=ROUND(SUM(B{cat_first_row}:B{row - 1}),2)",
             )
             cat_total_cell.font = Font(bold=True)
             cat_total_cell.number_format = "#,##0.00"
@@ -350,7 +409,10 @@ class ExcelReportGenerator:
         write_header_row(ws, header_row, headers, accent)
         row = header_row + 1
         if not estimate.assumptions:
-            no_assumptions_row = ["-", "-", "-", "No changes were necessary; every requested value was directly supported."]
+            no_assumptions_row = [
+                "-", "-", "-",
+                "✓ No pricing assumptions were required. All requested values were directly supported.",
+            ]
             if has_ai_column:
                 no_assumptions_row.append("-")
             write_data_row(ws, row, no_assumptions_row)
@@ -408,18 +470,28 @@ class ExcelReportGenerator:
     def _build_recommendations(self, wb: Workbook, estimate: EstimateResult, branding: BrandingConfig):
         ws = wb.create_sheet("Recommendations")
         accent = branding.primary_color_hex
-        write_title(ws, "Architecture Recommendations", accent, row=1)
-        write_subtitle(ws, estimate.architecture.summary, row=2)
+        write_title(ws, "Suggested Architecture", accent, row=1)
+        write_subtitle(
+            ws,
+            f"{estimate.architecture.summary} These are architectural suggestions, not a priced quote - only "
+            "resources listed on the Resources and Pricing sheets are included in the cost estimate.",
+            row=2,
+        )
 
         header_row = 4
-        write_header_row(ws, header_row, ["Layer", "Recommended Service", "Rationale"], accent)
+        write_header_row(ws, header_row, ["Layer", "Recommended Service", "Rationale", "Included in This Estimate"], accent)
         row = header_row + 1
         for c in estimate.architecture.components:
-            write_data_row(ws, row, [c.layer, c.service, c.rationale])
+            included = (
+                "Recommended but not included in this estimate."
+                if c.layer.strip().lower() in _ADVISORY_ONLY_LAYERS
+                else "See the Resources/Pricing sheets for the corresponding priced line item(s)."
+            )
+            write_data_row(ws, row, [c.layer, c.service, c.rationale, included])
             row += 1
 
         freeze_header(ws, header_row)
-        autofit_columns(ws, widths={1: 20, 2: 40, 3: 60})
+        autofit_columns(ws, widths={1: 20, 2: 40, 3: 60, 4: 48})
         ws.sheet_view.showGridLines = False
 
     # -- Pricing (full itemized) ------------------------------------------------------------
@@ -428,7 +500,12 @@ class ExcelReportGenerator:
         ws = wb.create_sheet("Pricing")
         accent = branding.primary_color_hex
         write_title(ws, "Itemized Pricing", accent, row=1)
-        write_subtitle(ws, f"All priced line items, sourced from: {estimate.cost.line_items[0].source if estimate.cost.line_items else 'n/a'}.", row=2)
+        source = estimate.cost.line_items[0].source if estimate.cost.line_items else None
+        pricing_source_label, estimate_type = _pricing_source_display(source)
+        subtitle = f"All priced line items. Pricing Source: {pricing_source_label}."
+        if estimate_type:
+            subtitle += f" Estimate Type: {estimate_type}."
+        write_subtitle(ws, subtitle, row=2)
 
         header_row = 4
         write_header_row(ws, header_row, ["Category", "Description", "SKU", "Unit", "Quantity", "Unit Price", "Monthly Amount", "Source"], accent)
@@ -490,7 +567,7 @@ class ExcelReportGenerator:
             ws, row,
             [
                 "After Discount",
-                f"=B{subtotal_row}+SUM(B{discount_rows_start}:B{discount_rows_end})",
+                f"=ROUND(B{subtotal_row}+SUM(B{discount_rows_start}:B{discount_rows_end}),2)",
                 estimate.cost.currency,
             ],
         )
@@ -506,7 +583,7 @@ class ExcelReportGenerator:
 
         total_row = row
         ws.cell(row=total_row, column=1, value="Total Monthly Cost").font = Font(bold=True, size=12)
-        total_cell = ws.cell(row=total_row, column=2, value=f"=B{after_discount_row}+B{tax_row}+B{support_row}")
+        total_cell = ws.cell(row=total_row, column=2, value=f"=ROUND(B{after_discount_row}+B{tax_row}+B{support_row},2)")
         total_cell.font = Font(bold=True, size=12)
         total_cell.number_format = "#,##0.00"
         ws.cell(row=total_row, column=3, value=estimate.cost.currency)
@@ -544,9 +621,9 @@ class ExcelReportGenerator:
         write_data_row(ws, row, ["Monthly", f"=Totals!B{total_row}", estimate.cost.currency])
         monthly_row = row
         row += 1
-        write_data_row(ws, row, ["Yearly (x12)", f"=B{monthly_row}*12", estimate.cost.currency])
+        write_data_row(ws, row, ["Yearly (x12)", f"=ROUND(B{monthly_row}*12,2)", estimate.cost.currency])
         row += 1
-        write_data_row(ws, row, ["3-Year (x36)", f"=B{monthly_row}*36", estimate.cost.currency])
+        write_data_row(ws, row, ["3-Year (x36)", f"=ROUND(B{monthly_row}*36,2)", estimate.cost.currency])
         row += 1
 
         row += 1
@@ -554,7 +631,7 @@ class ExcelReportGenerator:
         row += 1
         month_header_row = row - 1
         for m in range(1, 13):
-            write_data_row(ws, row, [f"Month {m}", f"=B{monthly_row}*{m}"])
+            write_data_row(ws, row, [f"Month {m}", f"=ROUND(B{monthly_row}*{m},2)"])
             row += 1
 
         for r in range(header_row + 1, header_row + 4):

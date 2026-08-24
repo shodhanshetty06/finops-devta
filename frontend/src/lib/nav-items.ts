@@ -47,18 +47,18 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Build",
     items: [
       { label: "New Estimate", href: "/estimate/new", icon: PlusCircle, description: "Price a configuration in seconds" },
-      { label: "Existing Estimate", href: "/estimate/existing", icon: FilePlus2, description: "Add or update services on a saved estimate" },
+      { label: "Existing Estimates", href: "/estimate/existing", icon: FilePlus2, description: "Add or update services on a saved estimate" },
       { label: "Upload Excel", href: "/upload", icon: Upload, description: "Import a filled questionnaire workbook" },
-      { label: "Questionnaire", href: "/questionnaire", icon: FileText, description: "Guided step-by-step requirement intake" },
+      { label: "Project Questions", href: "/questionnaire", icon: FileText, description: "Guided step-by-step requirement intake" },
     ],
   },
   {
     label: "Analyze",
     items: [
-      { label: "Pricing", href: "/pricing", icon: Tags, description: "Browse the GCP catalog & compare regions" },
+      { label: "Cost Analysis", href: "/pricing", icon: Tags, description: "Browse the GCP catalog & compare regions" },
       { label: "Resource Optimization", href: "/optimization", icon: Scale, description: "Compare a saved resource's config against an upgrade/downgrade" },
       { label: "Validation", href: "/validation", icon: ShieldCheck, description: "Rule engine reference & live validator" },
-      { label: "Normalization", href: "/normalization", icon: SlidersHorizontal, description: "How ambiguous input gets resolved" },
+      { label: "Assumptions", href: "/normalization", icon: SlidersHorizontal, description: "How ambiguous input gets resolved" },
       { label: "Architecture", href: "/architecture", icon: Network, description: "Recommended service architecture" },
     ],
   },

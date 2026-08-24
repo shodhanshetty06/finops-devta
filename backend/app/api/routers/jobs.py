@@ -16,9 +16,11 @@ import io
 from typing import Any
 
 from celery.result import AsyncResult
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
+from app.api.dependencies import get_current_user_optional
+from app.db.models import UserModel
 from app.domain.jobs import BatchEstimateJobRequest, JobEnqueuedResponse, JobStatusResponse, ReportJobRequest
 from app.tasks.batch_tasks import generate_batch_estimates_task
 from app.tasks.celery_app import celery_app
@@ -31,11 +33,20 @@ router = APIRouter(prefix="/api/v1/jobs", tags=["Async Jobs"])
     "/reports", response_model=JobEnqueuedResponse, status_code=202,
     summary="Enqueue async report generation (Excel or PDF)",
 )
-def enqueue_report_job(request: ReportJobRequest) -> JobEnqueuedResponse:
+def enqueue_report_job(
+    request: ReportJobRequest,
+    current_user: UserModel | None = Depends(get_current_user_optional),
+) -> JobEnqueuedResponse:
+    # Same admin-only Audit-sheet gating as the synchronous
+    # /api/v1/reports/excel endpoint (see reports.py) - this route is still
+    # usable anonymously, an anonymous or non-admin caller just never gets
+    # the Audit sheet in the resulting Excel file.
+    is_admin = current_user is not None and current_user.role == "admin"
     async_result = generate_report_task.delay(
         request.estimate.model_dump(mode="json"),
         request.branding.model_dump(mode="json"),
         request.format,
+        is_admin,
     )
     return JobEnqueuedResponse(job_id=async_result.id)
 

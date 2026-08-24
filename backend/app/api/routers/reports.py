@@ -58,18 +58,17 @@ def export_excel(
     explanation_service: ExplanationService = Depends(get_explanation_service),
     currency_converter: CurrencyConverter = Depends(get_currency_converter),
 ):
-    estimate = request.estimate
-    if current_user is None or current_user.role != "admin":
-        # Audit log is an admin-only view (see projects.py's _to_detail()) -
-        # the Excel workbook has its own "Audit" sheet, so it needs the same
-        # stripping or a non-admin (or anonymous caller - this endpoint is
-        # stateless and doesn't require login) could get the trail via this
-        # export even though the JSON API withholds it.
-        estimate = estimate.model_copy(update={"audit_log": estimate.audit_log.model_copy(update={"entries": []})})
-    estimate = convert_estimate_currency(estimate, request.target_currency, currency_converter)
+    # Audit log is an admin-only view (see projects.py's _to_detail()) - the
+    # Excel workbook has its own "Audit" sheet, so it needs the same gating or
+    # a non-admin (or anonymous caller - this endpoint is stateless and
+    # doesn't require login) could get the trail via this export even though
+    # the JSON API withholds it. The sheet is omitted entirely rather than
+    # emptied, so its existence isn't visible to non-admins either.
+    is_admin = current_user is not None and current_user.role == "admin"
+    estimate = convert_estimate_currency(request.estimate, request.target_currency, currency_converter)
     explanation = _maybe_explain(estimate, request.include_ai_explanations, explanation_service)
     generator = ExcelReportGenerator()
-    file_bytes = generator.generate(estimate, request.branding, explanation)
+    file_bytes = generator.generate(estimate, request.branding, explanation, include_audit=is_admin)
     filename = f"{_safe_filename(estimate.project_name)}_estimate_{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
     return StreamingResponse(
         iter([file_bytes]),

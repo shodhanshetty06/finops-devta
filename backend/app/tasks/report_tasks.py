@@ -42,12 +42,17 @@ def generate_report_task(
     estimate_json: dict[str, Any],
     branding_json: dict[str, Any],
     report_format: ReportFormat,
+    include_audit: bool = False,
 ) -> dict[str, Any]:
     estimate = EstimateResult.model_validate(estimate_json)
     branding = BrandingConfig.model_validate(branding_json)
 
     if report_format == "excel":
-        file_bytes = ExcelReportGenerator().generate(estimate, branding)
+        # Same admin-only gating as the synchronous /api/v1/reports/excel
+        # and /api/v1/projects/.../reports/excel endpoints (see reports.py /
+        # projects.py) - defaults to False so a caller that doesn't thread
+        # an admin identity through never gets the Audit sheet by accident.
+        file_bytes = ExcelReportGenerator().generate(estimate, branding, include_audit=include_audit)
         suffix = "estimate"
     elif report_format == "pdf":
         file_bytes = PdfReportGenerator().generate(estimate, branding)

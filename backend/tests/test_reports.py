@@ -84,8 +84,8 @@ def test_pdf_report_is_valid_and_contains_key_sections(sample_estimate):
 
     reader = pypdf.PdfReader(io.BytesIO(pbytes))
     # The consolidated layout (Selected Resources + Category Totals +
-    # Itemized Pricing merged into one Cost Breakdown table, no forced
-    # PageBreaks) should keep even a multi-category, multi-assumption
+    # Itemized Pricing + Totals merged into one Cost Breakdown table, no
+    # forced PageBreaks) should keep even a multi-category, multi-assumption
     # estimate to a handful of pages rather than the old fixed ~7-page
     # skeleton every estimate used to produce regardless of content.
     assert 1 <= len(reader.pages) <= 5
@@ -99,20 +99,20 @@ def test_pdf_report_is_valid_and_contains_key_sections(sample_estimate):
         "Executive Summary",
         "Recommended Architecture",
         "Cost Breakdown",
-        "Category Totals",
-        "Totals",
+        "Total Monthly Cost",
         "Assumptions",
         "Configuration Review",
         "Savings Opportunities",
-        "Approval",
         f"{sample_estimate.cost.total_monthly:,.2f}",
     ]:
         assert expected in text, f"Expected '{expected}' in PDF text"
 
-    # The old separate "Itemized Pricing" table (raw line items) was merged
-    # into the Cost Breakdown table above - it must not still appear as its
-    # own duplicate section.
-    assert "Itemized Pricing" not in text
+    # The old separate "Itemized Pricing" / "Category Totals" / "Totals"
+    # tables (same figures shown three or four times over) were merged into
+    # the one Cost Breakdown table above - they must not still appear as
+    # their own duplicate sections.
+    for removed in ["Itemized Pricing", "Category Totals"]:
+        assert removed not in text
 
 
 def test_pdf_report_lists_every_architecture_component(sample_estimate):
@@ -242,9 +242,10 @@ def test_pdf_resources_section_shows_category_status_and_category_totals(sample_
     text = " ".join(p.extract_text() for p in reader.pages).replace("\n", " ")
 
     assert "Cost Breakdown" in text
-    assert "Category Totals" in text
     for s in sample_estimate.cost.resource_summaries:
         assert s.resource_name in text
+    # Every resource row still names its own category in the unified table
+    # (there's no separate "Category Totals" table any more).
     for category in sample_estimate.cost.category_totals:
         assert category in text
     # The normalized Compute Engine resource's assumption reason must be

@@ -229,15 +229,15 @@ def export_saved_version_excel(
 ):
     row = service.get_version(current_user, project_id, version)
     result = EstimateResult.model_validate(row.result_json)
-    if current_user.role != "admin":
-        # Audit log is an admin-only view - see _to_detail()'s stripping
-        # above. The Excel workbook has its own "Audit" sheet, so it needs
-        # the same treatment or a non-admin could get the trail via export
-        # even though the JSON API withholds it.
-        result = result.model_copy(update={"audit_log": result.audit_log.model_copy(update={"entries": []})})
+    # Audit log is an admin-only view - see _to_detail()'s stripping above.
+    # The Excel workbook has its own "Audit" sheet, so it needs the same
+    # gating or a non-admin could get the trail via export even though the
+    # JSON API withholds it. Omitted entirely rather than emptied, so its
+    # existence isn't visible to non-admins either.
+    include_audit = current_user.role == "admin"
     result = convert_estimate_currency(result, target_currency, currency_converter)
     explanation = explanation_service.explain_estimate(result) if include_ai_explanations else None
-    file_bytes = ExcelReportGenerator().generate(result, branding, explanation)
+    file_bytes = ExcelReportGenerator().generate(result, branding, explanation, include_audit=include_audit)
     filename = f"project{project_id}_v{version}_{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
     return StreamingResponse(
         iter([file_bytes]),

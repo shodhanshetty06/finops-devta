@@ -190,9 +190,7 @@ def test_excel_export_audit_sheet_hidden_from_non_admins_but_visible_to_admins(a
         headers=owner_headers,
     )
     assert resp.status_code == 200
-    ws = load_workbook(io.BytesIO(resp.content))["Audit"]
-    assert ws.max_row == 4  # title, subtitle, blank, header row - no entries
-    assert ws["A2"].value.startswith("0 recorded decisions")
+    assert "Audit" not in load_workbook(io.BytesIO(resp.content)).sheetnames
 
     resp = api_client.post(
         f"/api/v1/projects/{project['id']}/estimates/1/reports/excel",

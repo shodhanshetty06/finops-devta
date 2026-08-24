@@ -33,9 +33,9 @@ import { useCurrency } from "@/contexts/currency-context";
 
 const QUICK_ACTIONS = [
   { label: "New Estimate", description: "Price a configuration in seconds", href: "/estimate/new", icon: PlusCircle },
-  { label: "Existing Estimate", description: "Add or update services on a saved estimate", href: "/estimate/existing", icon: FilePlus2 },
+  { label: "Existing Estimates", description: "Add or update services on a saved estimate", href: "/estimate/existing", icon: FilePlus2 },
   { label: "Upload Excel", description: "Import a filled questionnaire", href: "/upload", icon: Upload },
-  { label: "Questionnaire", description: "Guided step-by-step intake", href: "/questionnaire", icon: FileSpreadsheet },
+  { label: "Project Questions", description: "Guided step-by-step intake", href: "/questionnaire", icon: FileSpreadsheet },
   { label: "All Projects", description: "Browse every project", href: "/projects", icon: FolderKanban },
 ];
 

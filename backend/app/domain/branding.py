@@ -7,7 +7,10 @@ from pydantic import BaseModel, Field
 
 class BrandingConfig(BaseModel):
     company_name: str = Field(default="GCP FinOps Estimation Platform")
-    prepared_by: str = Field(default="FinOps Consulting Team")
+    # Never a fabricated org name (e.g. "FinOps Consulting Team") - this is
+    # the platform's own name, shown only when the caller hasn't supplied a
+    # real preparer.
+    prepared_by: str = Field(default="GCP FinOps Estimation Platform")
     prepared_for: str | None = Field(default=None, description="Customer/client name shown on the cover page")
     contact_email: str | None = Field(default=None)
     primary_color_hex: str = Field(default="1A73E8", description="6-digit hex, no '#', used for header fills/accents")

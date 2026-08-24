@@ -37,7 +37,7 @@ export default function PricingPage() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">Pricing catalog</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">Cost Analysis catalog</h1>
         <p className="text-sm text-muted-foreground">
           Every configuration this platform currently considers supported - the same catalog the validation and pricing engines use.
         </p>

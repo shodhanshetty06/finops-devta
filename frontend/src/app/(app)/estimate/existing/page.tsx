@@ -352,7 +352,7 @@ function ExistingEstimateContent() {
   return (
     <div className="flex flex-col gap-6">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">Existing estimate</h1>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">Existing Estimates</h1>
         <p className="text-sm text-muted-foreground">
           Pick a saved estimate to update its Compute Engine sizing and/or add GCP services, or skip project
           selection entirely and price a configuration on its own.

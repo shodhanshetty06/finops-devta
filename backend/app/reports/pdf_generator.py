@@ -32,8 +32,7 @@ from datetime import datetime, timezone
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import cm
-from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.lib.units import cm, inch
 from reportlab.graphics.charts.piecharts import Pie
 from reportlab.graphics.shapes import Drawing
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -63,6 +62,14 @@ SEVERITY_LABELS = {"blocker": "Needs Attention", "warning": "Worth Reviewing"}
 # (21cm - 1.8cm - 1.8cm). Every table's colWidths must sum to at most this.
 _USABLE_WIDTH_CM = 21 - 1.8 - 1.8
 
+# Top/bottom margins are tight (0.5in) so a simple single-resource estimate
+# fits on one page; left/right stay at 1.8cm (everything above is sized to
+# that width). The footer is drawn inside this same bottom margin band -
+# see _footer() - so a smaller bottom margin also moves the footer's y
+# position, not just body content.
+_TOP_BOTTOM_MARGIN = 0.5 * inch
+_SIDE_MARGIN = 1.8 * cm
+
 
 class PdfReportGenerator:
     def generate(
@@ -76,7 +83,8 @@ class PdfReportGenerator:
         buf = io.BytesIO()
         doc = SimpleDocTemplate(
             buf, pagesize=A4,
-            topMargin=1.8 * cm, bottomMargin=1.8 * cm, leftMargin=1.8 * cm, rightMargin=1.8 * cm,
+            topMargin=_TOP_BOTTOM_MARGIN, bottomMargin=_TOP_BOTTOM_MARGIN,
+            leftMargin=_SIDE_MARGIN, rightMargin=_SIDE_MARGIN,
             title=f"{estimate.project_name} - Cost Estimate Proposal",
             author=branding.company_name,
         )
@@ -98,24 +106,22 @@ class PdfReportGenerator:
         # instead of the fixed ~7-page skeleton this used to always produce.
         story = []
         story += self._cover_and_executive_summary(estimate, branding, styles, accent, explanation)
-        story.append(Spacer(1, 10))
+        story.append(Spacer(1, 6))
         if fully_clean:
             story.append(self._validation_status_badge(styles))
-            story.append(Spacer(1, 14))
+            story.append(Spacer(1, 8))
         story += self._architecture_section(estimate, styles, accent)
-        story.append(Spacer(1, 12))
+        story.append(Spacer(1, 8))
         story += self._cost_breakdown_section(estimate, styles, accent)
         if estimate.assumptions:
-            story.append(Spacer(1, 14))
+            story.append(Spacer(1, 8))
             story += self._assumptions_section(estimate, styles, accent, explanation)
         if findings:
-            story.append(Spacer(1, 14))
+            story.append(Spacer(1, 8))
             story += self._validation_section(findings, styles, accent)
         if savings_items:
-            story.append(Spacer(1, 14))
+            story.append(Spacer(1, 8))
             story += self._savings_section(savings_items, styles)
-        story.append(Spacer(1, 16))
-        story += self._signature_section(branding, styles)
 
         doc.build(story, onFirstPage=self._footer(branding), onLaterPages=self._footer(branding))
         return buf.getvalue()
@@ -124,8 +130,15 @@ class PdfReportGenerator:
 
     def _build_styles(self, accent):
         styles = getSampleStyleSheet()
-        styles.add(ParagraphStyle("H1Accent", parent=styles["Heading1"], textColor=accent, spaceAfter=10))
-        styles.add(ParagraphStyle("H2Accent", parent=styles["Heading2"], textColor=accent, spaceBefore=14, spaceAfter=8))
+        # keepWithNext=True on both heading levels means the layout engine
+        # never breaks the page immediately after a heading - a section
+        # title always moves to the next page together with (at least the
+        # start of) whatever follows it, instead of being left as an orphan
+        # alone at the bottom of the previous page. Sections whose heading +
+        # table are also small/bounded (Cost Breakdown, Visual Breakdown) go
+        # further and wrap the whole thing in KeepTogether below.
+        styles.add(ParagraphStyle("H1Accent", parent=styles["Heading1"], textColor=accent, spaceAfter=8, keepWithNext=True))
+        styles.add(ParagraphStyle("H2Accent", parent=styles["Heading2"], textColor=accent, spaceBefore=8, spaceAfter=6, keepWithNext=True))
         styles.add(ParagraphStyle("BodySmall", parent=styles["BodyText"], fontSize=9, leading=12))
         styles.add(ParagraphStyle("CoverTitle", parent=styles["Title"], textColor=accent, fontSize=26))
         styles.add(ParagraphStyle("MetricLabel", parent=styles["BodyText"], fontSize=9, textColor=colors.grey))
@@ -145,20 +158,29 @@ class PdfReportGenerator:
     def _footer(self, branding: BrandingConfig):
         def _draw(canvas, doc):
             canvas.saveState()
-            font_name, font_size = "Helvetica", 7
+            # 8pt (not 7pt) per the disclaimer-legibility fix, and always
+            # measured/truncated by actual glyph width (_truncate_to_width)
+            # rather than a fixed character count - that's what guarantees
+            # the note plus page number can never run past the right margin
+            # ("...official G...") regardless of font size or note length.
+            font_name, font_size = "Helvetica", 8
             canvas.setFont(font_name, font_size)
             canvas.setFillColor(colors.grey)
 
-            left_x = 1.8 * cm
-            right_x = A4[0] - 1.8 * cm
+            left_x = _SIDE_MARGIN
+            right_x = A4[0] - _SIDE_MARGIN
+            # Sits inside the bottom margin band, below where body content
+            # stops flowing (_TOP_BOTTOM_MARGIN) - kept below that line with
+            # headroom so it never collides with the last line of content.
+            footer_y = min(0.6 * cm, _TOP_BOTTOM_MARGIN * 0.5)
             page_label = f"Page {doc.page}"
             page_label_width = stringWidth(page_label, font_name, font_size)
             gap = 0.4 * cm
             max_note_width = (right_x - left_x) - page_label_width - gap
 
             note = self._truncate_to_width(branding.footer_note.strip(), font_name, font_size, max_note_width)
-            canvas.drawString(left_x, 1.2 * cm, note)
-            canvas.drawRightString(right_x, 1.2 * cm, page_label)
+            canvas.drawString(left_x, footer_y, note)
+            canvas.drawRightString(right_x, footer_y, page_label)
             canvas.restoreState()
         return _draw
 
@@ -187,16 +209,21 @@ class PdfReportGenerator:
         explanation: EstimateExplanation | None = None,
     ):
         flow = []
-        flow.append(Spacer(1, 30))
+        flow.append(Spacer(1, 14))
         flow.append(Paragraph(branding.company_name, styles["CoverTitle"]))
         flow.append(Paragraph("Google Cloud FinOps Cost Estimate Proposal", styles["Heading2"]))
-        flow.append(Spacer(1, 14))
+        flow.append(Spacer(1, 8))
         flow.append(HRFlowable(width="100%", color=accent, thickness=1.2))
-        flow.append(Spacer(1, 14))
+        flow.append(Spacer(1, 8))
 
-        meta_rows = [
-            ["Project", self._cell(estimate.project_name, styles)],
-            ["Prepared For", self._cell(branding.prepared_for or "-", styles)],
+        meta_rows = [["Project", self._cell(estimate.project_name, styles)]]
+        if branding.prepared_for:
+            # Omitted rather than shown as "Prepared For: -" when nothing
+            # was actually supplied - a placeholder dash reads as a
+            # fabricated field, not as "no value given" (same fix as the
+            # Excel Summary sheet's Prepared For handling).
+            meta_rows.append(["Prepared For", self._cell(branding.prepared_for, styles)])
+        meta_rows += [
             ["Prepared By", self._cell(branding.prepared_by, styles)],
             ["Region", self._cell(estimate.normalized_spec.region, styles)],
             ["Normalization Strategy", estimate.strategy_used.capitalize()],
@@ -207,13 +234,13 @@ class PdfReportGenerator:
         meta_table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, -1), 10),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ("TOPPADDING", (0, 0), (-1, -1), 2),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 1),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#444444")),
         ]))
         flow.append(meta_table)
-        flow.append(Spacer(1, 18))
+        flow.append(Spacer(1, 10))
 
         flow.append(Paragraph("Executive Summary", styles["H1Accent"]))
         # Pricing-first, plain language: no "validated against N rules"
@@ -243,7 +270,7 @@ class PdfReportGenerator:
                 f"finalized - see the Configuration Review section for details."
             )
         flow.append(Paragraph(summary_text, styles["BodyText"]))
-        flow.append(Spacer(1, 14))
+        flow.append(Spacer(1, 8))
 
         metric_cells = [
             [Paragraph("MONTHLY", styles["MetricLabel"]), Paragraph("YEARLY", styles["MetricLabel"]), Paragraph("3-YEAR", styles["MetricLabel"])],
@@ -259,13 +286,13 @@ class PdfReportGenerator:
             ("INNERGRID", (0, 0), (-1, -1), 0.75, colors.HexColor("#E0E0E0")),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#F5F5F5")),
             ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-            ("TOPPADDING", (0, 0), (-1, -1), 8),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
         ]))
         flow.append(metric_table)
 
         if explanation is not None and explanation.executive_summary:
-            flow.append(Spacer(1, 14))
+            flow.append(Spacer(1, 10))
             flow.append(Paragraph("AI-Generated Summary", styles["H2Accent"]))
             flow.append(Paragraph(explanation.executive_summary, styles["BodyText"]))
         return [KeepTogether(flow)]
@@ -293,7 +320,7 @@ class PdfReportGenerator:
     def _architecture_section(self, estimate: EstimateResult, styles, accent):
         flow = [Paragraph("Recommended Architecture", styles["H1Accent"])]
         flow.append(Paragraph(estimate.architecture.summary, styles["BodyText"]))
-        flow.append(Spacer(1, 8))
+        flow.append(Spacer(1, 6))
         rows = [["Layer", "Recommended Service", "Rationale"]]
         for c in estimate.architecture.components:
             rows.append([c.layer, self._cell(c.service, styles), self._cell(c.rationale, styles)])
@@ -302,22 +329,31 @@ class PdfReportGenerator:
         flow.append(table)
         return [KeepTogether(flow)] if len(estimate.architecture.components) <= 1 else flow
 
-    # -- consolidated cost breakdown (table + category totals + grand totals) -
+    # -- consolidated cost breakdown (one table: line items + roll-up rows) --
 
     def _cost_breakdown_section(self, estimate: EstimateResult, styles, accent):
-        """Replaces the old separate "Selected Resources", "Category
-        Totals", and "Itemized Pricing" sections/tables with one - the
-        per-resource rows already reconcile exactly with both the category
-        totals and the pricing engine's own line-item totals (see
-        CostBreakdown's own invariant docs in app/domain/pricing.py), so
-        showing all three was the same numbers three times over, not three
-        different views a reader actually needs."""
-        flow = [Paragraph("Cost Breakdown", styles["H1Accent"])]
-        summaries = estimate.cost.resource_summaries
+        """One table for the whole financial picture - per-resource line
+        items immediately followed by the roll-up rows (Subtotal, Discounts,
+        Tax, Support, Total Monthly), sharing the same Subtotal/Amount
+        column. Replaces the old separate "Selected Resources" / "Category
+        Totals" / "Itemized Pricing" / "Totals" tables, which showed the
+        same figures three or four times over across separate headed
+        sections instead of the one view a reader actually needs.
 
+        Heading + table are wrapped in a single KeepTogether so "Cost
+        Breakdown" can never be orphaned alone at the bottom of a page -
+        for the bounded size of a real cost estimate (a handful to a few
+        dozen resources), keeping the whole thing together is worth it;
+        Visual Breakdown (below) intentionally stays a separate flowable so
+        it's free to start its own page if the table already filled one."""
+        cost = estimate.cost
+        columns = ["Category", "Resource", "Configuration", "Qty", "Unit Cost", "Subtotal"]
+        rows = [columns]
+        style = self._table_style(accent)
+        style.add("ALIGN", (3, 1), (5, -1), "RIGHT")
+
+        summaries = cost.resource_summaries
         if summaries:
-            rows = [["Category", "Resource", "Configuration", "Qty", "Unit Cost", "Subtotal", "Status"]]
-            grand_total = 0.0
             for s in summaries:
                 config_text = s.normalized_configuration or s.configuration
                 if s.status != "valid" and s.assumption_reason:
@@ -329,70 +365,51 @@ class PdfReportGenerator:
                     str(s.quantity),
                     f"{s.currency} {s.unit_cost:,.2f}",
                     f"{s.currency} {s.subtotal:,.2f}",
-                    s.status.replace("_", " ").title(),
                 ])
-                grand_total += s.subtotal
-            rows.append(["", "", "", "", "", "Grand Total", f"{estimate.cost.currency} {grand_total:,.2f}"])
-            table = Table(rows, colWidths=[2.0 * cm, 2.6 * cm, 5.1 * cm, 1.1 * cm, 2.2 * cm, 2.2 * cm, 2.0 * cm], repeatRows=1)
-            style = self._table_style(accent)
-            style.add("ALIGN", (3, 1), (5, -1), "RIGHT")
-            style.add("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold")
-            style.add("LINEABOVE", (0, -1), (-1, -1), 0.75, accent)
-            table.setStyle(style)
-            flow.append(table)
         else:
-            flow.append(Paragraph("No priced resources on this estimate.", styles["BodyText"]))
+            rows.append([self._cell("No priced resources on this estimate.", styles), "", "", "", "", ""])
+            style.add("SPAN", (0, 1), (5, 1))
 
-        if estimate.cost.category_totals:
-            flow.append(Spacer(1, 10))
-            flow.append(Paragraph("Category Totals", styles["H2Accent"]))
-            cat_rows = [["Category", "Total"]]
-            for category, total in estimate.cost.category_totals.items():
-                cat_rows.append([category, f"{estimate.cost.currency} {total:,.2f}"])
-            cat_table = Table(cat_rows, colWidths=[8 * cm, 6 * cm], repeatRows=1)
-            cat_style = self._table_style(accent)
-            cat_style.add("ALIGN", (1, 1), (1, -1), "RIGHT")
-            cat_table.setStyle(cat_style)
-            flow.append(cat_table)
+        # Roll-up rows share the table: columns 0-4 span into one label
+        # cell, column 5 (the same money column every line item uses)
+        # holds the amount - visually and structurally the same table, not
+        # a second one bolted on underneath.
+        def _summary_row(label: str, value: str, *, bold: bool = False, rule_above: bool = False):
+            idx = len(rows)
+            rows.append([label, "", "", "", "", value])
+            style.add("SPAN", (0, idx), (4, idx))
+            if rule_above:
+                style.add("LINEABOVE", (0, idx), (-1, idx), 0.75, accent)
+            if bold:
+                style.add("FONTNAME", (0, idx), (-1, idx), "Helvetica-Bold")
+                style.add("BACKGROUND", (0, idx), (-1, idx), colors.HexColor("#F5F5F5"))
 
-        # Totals roll-up, directly underneath the cost breakdown table above
-        # rather than in its own section pages later in the document.
-        flow.append(Spacer(1, 10))
-        flow.append(Paragraph("Totals", styles["H2Accent"]))
-        totals_rows = [
-            ["Subtotal", f"{estimate.cost.currency} {estimate.cost.subtotal_monthly:,.2f}"],
-            ["Discounts", f"-{estimate.cost.currency} {estimate.cost.discount_total_monthly:,.2f}"],
-            [f"Tax ({estimate.cost.tax_rate_percent}%)", f"{estimate.cost.currency} {estimate.cost.tax_monthly:,.2f}"],
-            [f"Support Plan ({estimate.cost.support_plan_percent}%)", f"{estimate.cost.currency} {estimate.cost.support_monthly:,.2f}"],
-            ["Total Monthly", f"{estimate.cost.currency} {estimate.cost.total_monthly:,.2f}"],
-            ["Total Yearly", f"{estimate.cost.currency} {estimate.cost.total_yearly:,.2f}"],
-            ["Total 3-Year", f"{estimate.cost.currency} {estimate.cost.total_three_year:,.2f}"],
-        ]
-        totals_table = Table(totals_rows, colWidths=[8 * cm, 6 * cm])
-        totals_table.setStyle(TableStyle([
-            ("FONTSIZE", (0, 0), (-1, -1), 10),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-            ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-            ("LINEABOVE", (0, 4), (-1, 4), 0.75, accent),
-            ("FONTNAME", (0, 4), (-1, 6), "Helvetica-Bold"),
-            ("BACKGROUND", (0, 6), (-1, 6), colors.HexColor("#F5F5F5")),
-        ]))
-        flow.append(totals_table)
+        _summary_row("Subtotal", f"{cost.currency} {cost.subtotal_monthly:,.2f}", rule_above=True)
+        for d in cost.discounts:
+            _summary_row(f"Discount: {d.name} (-{d.percent_off}%)", f"-{cost.currency} {d.monthly_savings:,.2f}")
+        _summary_row(f"Tax ({cost.tax_rate_percent}%)", f"{cost.currency} {cost.tax_monthly:,.2f}")
+        _summary_row(f"Support Plan ({cost.support_plan_percent}%)", f"{cost.currency} {cost.support_monthly:,.2f}")
+        _summary_row("Total Monthly Cost", f"{cost.currency} {cost.total_monthly:,.2f}", bold=True, rule_above=True)
 
-        flow += self._visual_breakdown(estimate, styles, accent)
-        return flow
+        table = Table(rows, colWidths=[2.2 * cm, 2.8 * cm, 6.5 * cm, 1.2 * cm, 2.3 * cm, 2.4 * cm], repeatRows=1)
+        table.setStyle(style)
+
+        flow = [Paragraph("Cost Breakdown", styles["H1Accent"]), table]
+        return [KeepTogether(flow)] + self._visual_breakdown(estimate, styles, accent)
 
     def _visual_breakdown(self, estimate: EstimateResult, styles, accent):
-        """Pie chart only when there's actually something to compare - a
-        single-category estimate (e.g. 100% Database) has nothing for a pie
-        to usefully show, so it's replaced with a one-line statement
-        instead of a degenerate one-slice pie."""
-        flow = [Spacer(1, 10), Paragraph("Visual Breakdown", styles["H2Accent"])]
+        """Category-mix pie chart only. The old Monthly/Yearly/3-Year bar
+        chart was removed - those exact three figures are already the
+        headline MONTHLY/YEARLY/3-YEAR metric row on page 1 (see
+        _cover_and_executive_summary), so charting them again here added a
+        page without adding information. A single-category estimate (e.g.
+        100% Database) has nothing for a pie to usefully compare, so it
+        gets a one-line statement instead of a degenerate one-slice pie."""
+        flow = [Spacer(1, 6), Paragraph("Visual Breakdown", styles["H2Accent"])]
 
         categories = list(estimate.cost.category_totals.keys())
         values = [round(v, 2) for v in estimate.cost.category_totals.values()]
 
-        chart_row = []
         if len(categories) >= 2:
             drawing = Drawing(260, 200)
             pie = Pie()
@@ -406,29 +423,12 @@ class PdfReportGenerator:
             for i in range(len(values)):
                 pie.slices[i].fillColor = palette[i % len(palette)]
             drawing.add(pie)
-            chart_row.append(drawing)
+            flow.append(drawing)
         elif categories:
             flow.append(Paragraph(f"All costs are in a single category: <b>{categories[0]}</b> (100%).", styles["BodyText"]))
         else:
             flow.append(Paragraph("No priced line items to chart.", styles["BodyText"]))
 
-        bar_drawing = Drawing(260, 200)
-        chart = VerticalBarChart()
-        chart.x, chart.y = 40, 30
-        chart.width, chart.height = 190, 140
-        chart.data = [[estimate.cost.total_monthly, estimate.cost.total_yearly, estimate.cost.total_three_year]]
-        chart.categoryAxis.categoryNames = ["Monthly", "Yearly", "3-Year"]
-        chart.categoryAxis.labels.fontSize = 7
-        chart.valueAxis.labels.fontSize = 7
-        chart.bars[0].fillColor = accent
-        chart.valueAxis.valueMin = 0
-        bar_drawing.add(chart)
-        chart_row.append(bar_drawing)
-
-        if chart_row:
-            row_table = Table([chart_row], colWidths=[_USABLE_WIDTH_CM / len(chart_row) * cm] * len(chart_row))
-            row_table.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
-            flow.append(row_table)
         return [KeepTogether(flow)]
 
     # -- assumptions ------------------------------------------------------------
@@ -505,24 +505,6 @@ class PdfReportGenerator:
             flow.append(Spacer(1, 4))
         return flow
 
-    # -- signature ------------------------------------------------------------
-
-    def _signature_section(self, branding: BrandingConfig, styles):
-        flow = [Paragraph("Approval", styles["H1Accent"])]
-        rows = [
-            ["Prepared By:", branding.prepared_by, "Date:", ""],
-            ["", "_" * 30, "", "_" * 20],
-            ["Approved By:", branding.prepared_for or "", "Date:", ""],
-            ["", "_" * 30, "", "_" * 20],
-        ]
-        table = Table(rows, colWidths=[3 * cm, 6 * cm, 2 * cm, 4 * cm])
-        table.setStyle(TableStyle([
-            ("FONTSIZE", (0, 0), (-1, -1), 10),
-            ("TOPPADDING", (0, 0), (-1, -1), 10),
-        ]))
-        flow.append(table)
-        return [KeepTogether(flow)]
-
     def _table_style(self, accent) -> TableStyle:
         return TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), accent),
@@ -532,6 +514,6 @@ class PdfReportGenerator:
             ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#DDDDDD")),
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#FAFAFA")]),
-            ("TOPPADDING", (0, 0), (-1, -1), 4),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ])

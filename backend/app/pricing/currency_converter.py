@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -213,6 +214,23 @@ class CurrencyExchangeClient:
         raise CurrencyProviderError(f"Could not fetch live exchange rates: {last_exc}")
 
 
+def _reprice_audit_detail(detail: str, from_currency: str, to_currency: str, rate: float) -> str:
+    """Rescales any `<amount> <from_currency>` mentions embedded in an audit
+    log entry's free-text detail (see AuditLogger.record_pricing /
+    record("pipeline_complete", ...)) into `to_currency`, using the same
+    rate/rounding as every other figure on the converted estimate. Without
+    this, a report exported in AUD would show every sheet in AUD except the
+    Audit sheet, which would still read "128.40 USD/month" verbatim - the
+    exact currency-mixing bug this function exists to prevent."""
+    pattern = re.compile(rf"(-?\d+(?:\.\d+)?) {re.escape(from_currency)}\b")
+
+    def _sub(match: re.Match) -> str:
+        amount = float(match.group(1))
+        return f"{round(amount * rate, 2)} {to_currency}"
+
+    return pattern.sub(_sub, detail)
+
+
 class CurrencyConverter:
     """Public entry point: `get_rates()` for the raw snapshot (what the API
     endpoint returns), `convert()` for a single already-priced amount."""
@@ -264,10 +282,13 @@ class CurrencyConverter:
 
         Percentages (tax_rate_percent, support_plan_percent, a discount's
         percent_off) are currency-independent and left untouched - only
-        absolute currency amounts are rescaled. Audit log entries are a
-        free-text historical record and are not rewritten to a different
-        currency; they keep the wording/figures of the currency the
-        estimate was actually priced and audited in.
+        absolute currency amounts are rescaled. Audit log entries are
+        free-text, but any `<amount> <currency>` they mention is rescaled
+        too (see `_reprice_audit_detail`) - otherwise the Audit sheet would
+        keep showing the original pricing currency (e.g. USD) while every
+        other sheet in the export shows the target currency, which is
+        exactly the kind of mixed-currency report this method exists to
+        prevent.
 
         Returns `estimate` unchanged (no rate fetch at all) when it's
         already priced in `to_currency`. Raises CurrencyProviderError if no
@@ -288,6 +309,16 @@ class CurrencyConverter:
             return round(value * rate, 2)
 
         cost = estimate.cost
+
+        # total_yearly/total_three_year are derived from the converted
+        # total_monthly (the one canonical converted figure) rather than
+        # independently scaled from the native totals - scaling each
+        # separately double-rounds at two different points and can produce
+        # a converted total_yearly that's a cent or two off from converted
+        # total_monthly * 12, even though the native-currency totals were
+        # exactly consistent before conversion.
+        converted_total_monthly = scaled(cost.total_monthly)
+
         converted_cost = cost.model_copy(update={
             "currency": to_currency,
             "line_items": [
@@ -304,11 +335,21 @@ class CurrencyConverter:
             "discount_total_monthly": scaled(cost.discount_total_monthly),
             "tax_monthly": scaled(cost.tax_monthly),
             "support_monthly": scaled(cost.support_monthly),
-            "total_monthly": scaled(cost.total_monthly),
-            "total_yearly": scaled(cost.total_yearly),
-            "total_three_year": scaled(cost.total_three_year),
+            "total_monthly": converted_total_monthly,
+            "total_yearly": round(converted_total_monthly * 12, 2),
+            "total_three_year": round(converted_total_monthly * 36, 2),
         })
-        return estimate.model_copy(update={"cost": converted_cost})
+
+        converted_audit_log = estimate.audit_log.model_copy(update={
+            "entries": [
+                entry.model_copy(update={
+                    "detail": _reprice_audit_detail(entry.detail, from_currency, to_currency, rate),
+                })
+                for entry in estimate.audit_log.entries
+            ],
+        })
+
+        return estimate.model_copy(update={"cost": converted_cost, "audit_log": converted_audit_log})
 
 
 def convert_estimate_currency(
