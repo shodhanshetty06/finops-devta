@@ -8,8 +8,10 @@ import { useParams } from "next/navigation";
 import { EstimateResultView } from "@/components/estimate-result-view";
 import { ExportButtons } from "@/components/export-buttons";
 import { OptimizationPanel } from "@/components/finops/optimization-panel";
+import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import { useSetAssistantEstimate } from "@/contexts/assistant-context";
 import { apiErrorMessage, projectsApi } from "@/lib/api-client";
 import { formatDate } from "@/lib/utils";
@@ -57,7 +59,15 @@ function EstimateDashboard({ projectId, version }: { projectId: number; version:
             {result.normalized_spec.region}
           </p>
         </div>
-        <ExportButtons projectId={projectId} version={version} projectName={result.project_name} />
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/projects/${projectId}/new?from=${version}`}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+          >
+            Edit &amp; recalculate
+          </Link>
+          <ExportButtons projectId={projectId} version={version} projectName={result.project_name} />
+        </div>
       </div>
 
       <EstimateResultView result={result} />

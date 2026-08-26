@@ -24,15 +24,22 @@ import {
 import { WIZARD_STEPS, useWizardState } from "@/components/wizard/use-wizard-state";
 import { EstimateResultView } from "@/components/estimate-result-view";
 import { apiErrorMessage, estimateApi, projectsApi } from "@/lib/api-client";
-import type { EstimateResult, ValidationReport } from "@/lib/types";
+import type { CustomerRequirement, EstimateResult, ValidationReport } from "@/lib/types";
 
 /** The 7-step guided requirement wizard. Used both project-scoped
  * (`/projects/[id]/new` - saves directly as a new version and redirects)
  * and standalone (`/questionnaire` - prices statelessly and shows the
- * result inline, with an option to save it into a project afterward). */
-export function QuestionnaireWizard({ projectId }: { projectId?: number }) {
+ * result inline, with an option to save it into a project afterward).
+ *
+ * `initial`, when given, prefills every step from an existing requirement -
+ * e.g. editing a previously saved estimate (see
+ * `/projects/[id]/new?from=<version>`). Submitting always creates a brand
+ * new, independent version from this one in-memory requirement; it never
+ * patches or merges with whatever the previous version had, so recalculating
+ * can never pull in stale/unrelated resources. */
+export function QuestionnaireWizard({ projectId, initial }: { projectId?: number; initial?: CustomerRequirement }) {
   const router = useRouter();
-  const state = useWizardState();
+  const state = useWizardState(initial);
   const { requirement, stepIndex, currentStepName, goNext, goBack, goToStep } = state;
 
   const [validation, setValidation] = useState<ValidationReport | null>(null);

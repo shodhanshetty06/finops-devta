@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, Info, Upload as UploadIcon, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, FileText, Info, Sparkles, Upload as UploadIcon, XCircle } from "lucide-react";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 
@@ -10,13 +10,16 @@ import { SaveToProjectDialog } from "@/components/save-to-project-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 import { useSetAssistantEstimate } from "@/contexts/assistant-context";
 import { useCurrency } from "@/contexts/currency-context";
 import { apiErrorMessage, downloadReport, estimateApi, intakeApi, reportsApi } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
-import type { EstimateResult, IntakeResponse, ParseIssue } from "@/lib/types";
+import { REGIONS, type EstimateResult, type IntakeResponse, type ParseIssue, type RegionCode } from "@/lib/types";
+
+const DEFAULT_REGION: RegionCode = "us-central1";
 
 function IssueIcon({ severity }: { severity: ParseIssue["severity"] }) {
   if (severity === "blocker") return <XCircle className="h-4 w-4 shrink-0" />;
@@ -45,10 +48,6 @@ function ExportEstimateButtons({ estimate }: { estimate: EstimateResult }) {
       const url = kind === "excel" ? reportsApi.exportExcelUrl() : reportsApi.exportPdfUrl();
       const ext = kind === "excel" ? "xlsx" : "pdf";
       const filename = `${estimate.project_name.replace(/[^a-zA-Z0-9]+/g, "_")}_estimate.${ext}`;
-      // Renders the report in whatever currency is currently selected on
-      // screen (see useCurrency()) - the backend converts every figure via
-      // CurrencyConverter.convert_estimate before rendering, or falls back
-      // to the estimate's native currency if a rate isn't available.
       await downloadReport(url, filename, { estimate, target_currency: displayCurrency });
     } catch (err) {
       toast.error(`Could not export ${kind.toUpperCase()}`, { description: apiErrorMessage(err) });
@@ -71,46 +70,75 @@ function ExportEstimateButtons({ estimate }: { estimate: EstimateResult }) {
   );
 }
 
+/** Every field this page owns, cleared together by resetState() - no piece
+ * of a previous upload (or a previous Quick Estimate on another page,
+ * which lives in its own separate component state entirely) can ever leak
+ * into the next upload. */
+function initialState() {
+  return {
+    selectedFileName: null as string | null,
+    response: null as IntakeResponse | null,
+    selectedRegion: DEFAULT_REGION as RegionCode,
+    saveDialogOpen: false,
+  };
+}
+
 export default function UploadExcelPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [autoEstimate, setAutoEstimate] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isPricing, setIsPricing] = useState(false);
-  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
-  const [response, setResponse] = useState<IntakeResponse | null>(null);
-  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [state, setState] = useState(initialState);
+  const { selectedFileName, response, selectedRegion, saveDialogOpen } = state;
   useSetAssistantEstimate(response?.estimate ?? null);
+
+  function resetState() {
+    setState(initialState());
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    setSelectedFileName(file.name);
-    setResponse(null);
+    // A fresh calculation context starts the instant a new/replacement file
+    // is chosen - the previous file's requirement, issues, estimate, and
+    // region selection are all wiped before the new upload is even sent,
+    // so nothing from the old file can end up mixed into the new one.
+    setState({ ...initialState(), selectedFileName: file.name });
     setIsUploading(true);
     try {
-      const result = await intakeApi.uploadExcel(file, autoEstimate);
-      setResponse(result);
-      toast.success(result.estimate ? "Questionnaire parsed and priced" : "Questionnaire parsed");
+      const result = await intakeApi.uploadExcel(file, false);
+      setState((prev) => ({
+        ...prev,
+        response: result,
+        selectedRegion: (result.requirement?.region as RegionCode) ?? DEFAULT_REGION,
+      }));
+      if (result.requirement) {
+        toast.success(
+          result.extraction_source === "ai"
+            ? "Workbook understood via AI-assisted extraction - review the results below"
+            : "Questionnaire parsed",
+        );
+      } else {
+        toast.error("Could not confidently read this workbook");
+      }
     } catch (err) {
       toast.error("Could not process the workbook", { description: apiErrorMessage(err) });
+      setState((prev) => ({ ...prev, response: null }));
     } finally {
       setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }
 
-  function handleRemoveFile() {
-    setSelectedFileName(null);
-    setResponse(null);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }
-
-  async function handlePriceNow(force: boolean) {
+  async function handleCalculatePrice(force: boolean) {
     if (!response?.requirement) return;
     setIsPricing(true);
     try {
-      const estimate = await estimateApi.create(response.requirement, { force });
-      setResponse((prev) => (prev ? { ...prev, estimate } : prev));
+      // The region picked above always wins, however the workbook was
+      // parsed and regardless of anything a previous estimate (here or on
+      // the Quick Estimate page) used - never silently reused.
+      const requirement = { ...response.requirement, region: selectedRegion };
+      const estimate = await estimateApi.create(requirement, { force });
+      setState((prev) => ({ ...prev, response: prev.response ? { ...prev.response, requirement, estimate } : prev.response }));
       toast.success("Priced successfully");
     } catch (err) {
       toast.error("Could not price this requirement", { description: apiErrorMessage(err) });
@@ -123,13 +151,18 @@ export default function UploadExcelPage() {
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-foreground">Upload Excel</h1>
-        <p className="text-sm text-muted-foreground">Import a filled questionnaire workbook - every field is parsed and flagged transparently.</p>
+        <p className="text-sm text-muted-foreground">
+          Upload any customer requirements workbook - our own template or an arbitrary layout. Every field is parsed
+          and flagged transparently, and nothing is priced until you choose a region and calculate.
+        </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>1. Get the template</CardTitle>
-          <CardDescription>Download the blank questionnaire, fill it in offline, then come back and upload it below.</CardDescription>
+          <CardTitle>1. Get the template (optional)</CardTitle>
+          <CardDescription>
+            Works with any customer workbook layout - but the standard template parses instantly with no AI step.
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <a href={intakeApi.templateUrl()} download>
@@ -147,11 +180,6 @@ export default function UploadExcelPage() {
           <CardDescription>Parses every field and shows exactly what couldn&apos;t be confidently read.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <label className="flex items-center gap-2 text-sm text-foreground">
-            <Checkbox checked={autoEstimate} onChange={(e) => setAutoEstimate(e.target.checked)} />
-            Automatically price the result once parsed
-          </label>
-
           {selectedFileName ? (
             <div className="flex items-center justify-between gap-3 rounded-lg border border-border-strong px-4 py-3">
               <div className="flex min-w-0 items-center gap-2 text-sm text-foreground">
@@ -163,9 +191,9 @@ export default function UploadExcelPage() {
                   <span className="px-2 text-sm font-medium text-primary-600 hover:underline">Replace</span>
                   <input ref={fileInputRef} type="file" accept=".xlsx" onChange={handleFileChange} disabled={isUploading} className="hidden" />
                 </label>
-                <Button type="button" variant="ghost" size="sm" onClick={handleRemoveFile} disabled={isUploading}>
+                <Button type="button" variant="ghost" size="sm" onClick={resetState} disabled={isUploading}>
                   <XCircle className="h-4 w-4" />
-                  Remove
+                  Remove / Reset
                 </Button>
               </div>
             </div>
@@ -178,7 +206,7 @@ export default function UploadExcelPage() {
             >
               {isUploading ? <Spinner className="h-6 w-6 text-muted-foreground" /> : <UploadIcon className="h-6 w-6 text-muted-foreground" />}
               <span className="text-sm font-medium text-foreground">{isUploading ? "Processing..." : "Click to choose a .xlsx file"}</span>
-              <span className="text-xs text-muted-foreground">or drag and drop</span>
+              <span className="text-xs text-muted-foreground">or drag and drop - any layout is fine</span>
               <input ref={fileInputRef} type="file" accept=".xlsx" onChange={handleFileChange} disabled={isUploading} className="hidden" />
             </label>
           )}
@@ -187,11 +215,34 @@ export default function UploadExcelPage() {
 
       {response && (
         <>
+          {response.extraction_source === "ai" && (
+            <div className="flex items-center gap-2 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-700 dark:border-primary-900 dark:bg-primary-950 dark:text-primary-300">
+              <Sparkles className="h-4 w-4 shrink-0" />
+              This workbook didn&apos;t match our standard layout, so it was read with AI-assisted extraction. Every
+              value below still comes only from your file - review the assumptions and mapping warnings before pricing.
+            </div>
+          )}
+
+          {response.requirement === null && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-error-700 dark:text-error-300">
+                  <XCircle className="h-4 w-4" />
+                  We could not confidently identify the required cloud resources
+                </CardTitle>
+                <CardDescription>
+                  Please review the details below, then either fix the workbook and re-upload, or download the
+                  standard template and fill it in directly.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          )}
+
           {response.issues.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  Parse issues
+                  {response.requirement ? "Mapping warnings" : "Details"}
                   <Badge variant="secondary">{response.issues.length}</Badge>
                 </CardTitle>
               </CardHeader>
@@ -215,9 +266,10 @@ export default function UploadExcelPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  Inferred assumptions
+                  Assumptions
                   <Badge variant="secondary">{response.notes.length}</Badge>
                 </CardTitle>
+                <CardDescription>Anything inferred or converted from your workbook, explained plainly.</CardDescription>
               </CardHeader>
               <CardContent>
                 <AssumptionsList assumptions={response.notes} />
@@ -225,52 +277,75 @@ export default function UploadExcelPage() {
             </Card>
           )}
 
-          {response.estimate ? (
+          {response.requirement && !response.estimate && (
+            <Card>
+              <CardHeader>
+                <CardTitle>3. Region &amp; pricing</CardTitle>
+                <CardDescription>
+                  The selected region is always used for pricing, regardless of what the workbook contained.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <div className="flex flex-col gap-1.5 sm:max-w-xs">
+                  <Label htmlFor="region">Region</Label>
+                  <Select
+                    id="region"
+                    value={selectedRegion}
+                    onChange={(e) => setState((prev) => ({ ...prev, selectedRegion: e.target.value as RegionCode }))}
+                  >
+                    {REGIONS.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  {(() => {
+                    const hasBlockers = response.issues.some((issue) => issue.severity === "blocker");
+                    return (
+                      <Button size="sm" onClick={() => handleCalculatePrice(hasBlockers)} disabled={isPricing}>
+                        {isPricing ? <Spinner /> : null}
+                        {hasBlockers ? "Force calculate price anyway" : "Calculate Price"}
+                      </Button>
+                    );
+                  })()}
+                </div>
+                <details className="text-xs text-muted-foreground">
+                  <summary className="cursor-pointer select-none">View extracted requirement (JSON)</summary>
+                  <pre className="mt-2 overflow-x-auto rounded-md bg-muted p-4">{JSON.stringify(response.requirement, null, 2)}</pre>
+                </details>
+              </CardContent>
+            </Card>
+          )}
+
+          {response.estimate && (
             <>
               <div className="flex items-center justify-between gap-3">
                 <p className="flex items-center gap-2 text-sm text-success-700 dark:text-success-400">
                   <CheckCircle2 className="h-4 w-4" />
-                  Priced successfully
+                  Priced successfully in {selectedRegion}
                 </p>
                 <div className="flex items-center gap-2">
                   <ExportEstimateButtons estimate={response.estimate} />
-                  <Button size="sm" onClick={() => setSaveDialogOpen(true)}>
-                    Save to a project
+                  <Button size="sm" onClick={() => setState((prev) => ({ ...prev, saveDialogOpen: true }))}>
+                    Save Estimate
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={resetState}>
+                    Reset
                   </Button>
                 </div>
               </div>
               <EstimateResultView result={response.estimate} />
               {response.requirement && (
-                <SaveToProjectDialog open={saveDialogOpen} onOpenChange={setSaveDialogOpen} requirement={response.requirement} commitmentTermYears={0} />
+                <SaveToProjectDialog
+                  open={saveDialogOpen}
+                  onOpenChange={(open) => setState((prev) => ({ ...prev, saveDialogOpen: open }))}
+                  requirement={response.requirement}
+                  commitmentTermYears={0}
+                />
               )}
             </>
-          ) : (
-            response.requirement && (() => {
-              const hasBlockers = response.issues.some((issue) => issue.severity === "blocker");
-              return (
-                <Card>
-                  <CardHeader>
-                    <CardTitle>Parsed requirement</CardTitle>
-                    <CardDescription>
-                      {hasBlockers
-                        ? "Pricing was blocked by the issue(s) marked above. Resolve them and re-upload, or force a price anyway."
-                        : "Automatic pricing was off for this upload. Review the parsed data below, then price it whenever you're ready."}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="flex flex-col gap-4">
-                    <div>
-                      <Button size="sm" onClick={() => handlePriceNow(hasBlockers)} disabled={isPricing}>
-                        {isPricing ? <Spinner /> : null}
-                        {hasBlockers ? "Force price anyway" : "Price this now"}
-                      </Button>
-                    </div>
-                    <pre className="overflow-x-auto rounded-md bg-muted p-4 text-xs text-foreground">
-                      {JSON.stringify(response.requirement, null, 2)}
-                    </pre>
-                  </CardContent>
-                </Card>
-              );
-            })()
           )}
         </>
       )}

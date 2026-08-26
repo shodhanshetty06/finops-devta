@@ -550,6 +550,10 @@ export interface IntakeResponse {
   issues: ParseIssue[];
   notes: Assumption[];
   estimate: EstimateResult | null;
+  // "template" - matched the platform's own questionnaire layout, no AI call made.
+  // "ai" - an arbitrary customer layout was understood via Groq extraction.
+  // "unrecognized" - neither path could confidently identify a requirement.
+  extraction_source: "template" | "ai" | "unrecognized";
 }
 
 // -- Catalog (backend/app/catalog/models.py) -----------------------------

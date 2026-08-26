@@ -34,11 +34,11 @@ from app.domain.project import (
     ProjectRead,
 )
 from app.domain.requirements import CustomerRequirement
-from app.intake.excel_parser import ExcelQuestionnaireParser
 from app.intake.text_extractor import NaturalLanguageRequirementExtractor
 from app.pricing.currency_converter import CurrencyConverter, convert_estimate_currency, get_currency_converter
 from app.reports.excel_generator import ExcelReportGenerator
 from app.services.explanation_service import ExplanationService, get_explanation_service
+from app.services.extraction_service import ExtractionService, get_extraction_service
 from app.reports.pdf_generator import PdfReportGenerator
 from app.repositories.estimate_repository import EstimateVersionRepository
 from app.services.project_service import ProjectService
@@ -292,10 +292,11 @@ async def create_estimate_version_from_excel(
     commitment_term_years: int = Query(default=0, ge=0, le=3),
     current_user: UserModel = Depends(get_current_user),
     service: ProjectService = Depends(get_project_service),
+    extraction_service: ExtractionService = Depends(get_extraction_service),
     settings: Settings = Depends(get_settings),
 ):
     file_bytes = await read_upload_bounded(file, settings.max_upload_size_bytes)
-    requirement, issues = ExcelQuestionnaireParser().parse(file_bytes)
+    requirement, issues, _notes, _source = extraction_service.extract(file_bytes)
     if requirement is None:
         detail = "; ".join(f"{i.field}: {i.message}" for i in issues) or "no usable fields were found"
         raise IntakeParseError(f"The questionnaire could not be parsed ({detail}).")

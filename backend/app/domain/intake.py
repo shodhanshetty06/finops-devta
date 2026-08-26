@@ -26,6 +26,14 @@ class IntakeResponse(BaseModel):
     issues: list[ParseIssue] = []
     notes: list[Assumption] = []
     estimate: EstimateResult | None = None
+    # "template" - matched the platform's own questionnaire layout, no LLM
+    # call made. "ai" - an arbitrary customer layout was understood via
+    # Groq extraction (see app/services/extraction_service.py); every
+    # extracted value is still validated by the same schema/coercion rules
+    # as the template path, and every substitution appears in `notes`.
+    # "unrecognized" - neither path could confidently identify any
+    # requirement; `requirement` is None and `issues` explains why.
+    extraction_source: str = "template"
 
 
 class TextIntakeRequest(BaseModel):

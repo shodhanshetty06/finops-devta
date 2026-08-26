@@ -17,10 +17,10 @@ from app.core.config import Settings, get_settings
 from app.core.exceptions import ValidationFailedError
 from app.core.uploads import read_upload_bounded
 from app.domain.intake import IntakeResponse, ParseIssue, TextIntakeRequest
-from app.intake.excel_parser import ExcelQuestionnaireParser
 from app.intake.excel_template import ExcelTemplateGenerator
 from app.intake.text_extractor import NaturalLanguageRequirementExtractor
 from app.services.estimation_service import EstimationService
+from app.services.extraction_service import ExtractionService, get_extraction_service
 
 router = APIRouter(prefix="/api/v1/intake", tags=["Intake"])
 
@@ -55,12 +55,17 @@ def download_excel_template():
 
 @router.post(
     "/excel", response_model=IntakeResponse,
-    summary="Upload a filled-in Excel questionnaire and parse it into a requirement",
+    summary="Upload any customer requirements workbook and extract a requirement from it",
     description=(
         "Parses each field independently - a mistake in one section (e.g. an invalid machine family) "
         "is reported as an issue for that field/section only and never prevents the rest of the "
-        "questionnaire from being read. Pass auto_estimate=true to also run the full estimation pipeline "
-        "and return a priced EstimateResult in the same response."
+        "workbook from being read. The platform's own questionnaire template is tried first (no AI call); "
+        "if the workbook doesn't match that layout at all, Groq is used to extract requirements from "
+        "whatever arbitrary sheets/headers the customer actually used - see "
+        "app/services/extraction_service.py for the guarantee that Groq only ever extracts values already "
+        "present in the file and never computes a price. Check `extraction_source` in the response to see "
+        "which path was used, and `issues` for anything that needs manual review. Pass auto_estimate=true "
+        "to also run the full estimation pipeline and return a priced EstimateResult in the same response."
     ),
 )
 async def upload_excel_questionnaire(
@@ -69,10 +74,11 @@ async def upload_excel_questionnaire(
     force: bool = Query(default=False),
     commitment_term_years: int = Query(default=0, ge=0, le=3),
     estimation_service: EstimationService = Depends(get_estimation_service),
+    extraction_service: ExtractionService = Depends(get_extraction_service),
     settings: Settings = Depends(get_settings),
 ):
     file_bytes = await read_upload_bounded(file, settings.max_upload_size_bytes)
-    requirement, issues = ExcelQuestionnaireParser().parse(file_bytes)
+    requirement, issues, notes, source = extraction_service.extract(file_bytes)
 
     estimate = None
     if auto_estimate and requirement is not None:
@@ -80,7 +86,7 @@ async def upload_excel_questionnaire(
             estimation_service, requirement, issues, force=force, commitment_term_years=commitment_term_years,
         )
 
-    return IntakeResponse(requirement=requirement, issues=issues, estimate=estimate)
+    return IntakeResponse(requirement=requirement, issues=issues, notes=notes, estimate=estimate, extraction_source=source)
 
 
 @router.post(

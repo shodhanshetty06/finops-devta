@@ -8,40 +8,23 @@ A typo in the Database section still lets the Compute section come through
 cleanly - the caller sees exactly which section/field failed and why via
 `ParseIssue`, the same "always explain, never hide" philosophy as
 `Assumption` and `ValidationResult`.
+
+Only understands this platform's own template (labels in column A, values
+in column B, matched by exact label text) - a customer's own arbitrary
+workbook layout won't match these labels and will simply parse as empty.
+See app/services/extraction_service.py for the Groq-based fallback that
+handles that case.
 """
 import io
-from datetime import datetime, timezone
 
 import openpyxl
-from pydantic import ValidationError
 
 from app.core.exceptions import IntakeParseError
 from app.domain.enums import Severity
 from app.domain.intake import ParseIssue
-from app.domain.requirements import (
-    AvailabilityRequirement,
-    BusinessContext,
-    ComputeRequirement,
-    CustomerRequirement,
-    DatabaseRequirement,
-    KubernetesRequirement,
-    NetworkRequirement,
-    StorageRequirement,
-)
+from app.domain.requirements import CustomerRequirement
+from app.intake.build import build_customer_requirement, coerce_value
 from app.intake.schema import FIELD_SCHEMA, SECTION_KEYS
-
-_SECTION_MODELS = {
-    "compute": ComputeRequirement,
-    "storage": StorageRequirement,
-    "database": DatabaseRequirement,
-    "network": NetworkRequirement,
-    "kubernetes": KubernetesRequirement,
-    "availability": AvailabilityRequirement,
-    "business": BusinessContext,
-}
-
-_TRUE_STRINGS = {"true", "yes", "y", "1"}
-_FALSE_STRINGS = {"false", "no", "n", "0"}
 
 
 class ExcelQuestionnaireParser:
@@ -60,7 +43,7 @@ class ExcelQuestionnaireParser:
                 continue
 
             try:
-                coerced = self._coerce(raw_value, spec)
+                coerced = coerce_value(raw_value, spec)
             except (TypeError, ValueError):
                 issues.append(ParseIssue(
                     field=spec.label,
@@ -75,51 +58,8 @@ class ExcelQuestionnaireParser:
                 section_key, field_key = spec.path
                 sections[section_key][field_key] = coerced
 
-        if not top_level.get("project_name"):
-            # No hard requirement to name a project up front - a customer who
-            # only has requirements (no project linked yet) can still get a
-            # priced estimate. A default name is generated so downstream
-            # code (which always expects a non-empty project_name) keeps
-            # working, and the substitution is surfaced as a WARNING rather
-            # than silently applied, per this parser's "always explain,
-            # never hide" philosophy.
-            default_name = f"Quick Estimate {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}"
-            top_level["project_name"] = default_name
-            issues.append(ParseIssue(
-                field="Project Name",
-                message=f"Project Name was left blank - used '{default_name}' so this could still be parsed and priced. Rename it later when you save it to a project.",
-                severity=Severity.WARNING,
-            ))
-
-        built_sections: dict = {}
-        for section_key, values in sections.items():
-            if not values:
-                built_sections[section_key] = None
-                continue
-            model_cls = _SECTION_MODELS[section_key]
-            try:
-                built_sections[section_key] = model_cls(**values)
-            except ValidationError as exc:
-                section_label = next(k for k, v in SECTION_KEYS.items() if v == section_key)
-                for err in exc.errors():
-                    field_name = ".".join(str(p) for p in err["loc"]) or section_key
-                    issues.append(ParseIssue(
-                        field=f"{section_label}.{field_name}",
-                        message=f"{err['msg']} - the entire {section_label} section was skipped.",
-                        severity=Severity.BLOCKER,
-                    ))
-                built_sections[section_key] = None
-
-        try:
-            requirement = CustomerRequirement(**top_level, **built_sections)
-        except ValidationError as exc:
-            for err in exc.errors():
-                issues.append(ParseIssue(
-                    field=".".join(str(p) for p in err["loc"]), message=err["msg"], severity=Severity.BLOCKER,
-                ))
-            return None, issues
-
-        return requirement, issues
+        requirement, build_issues = build_customer_requirement(top_level, sections)
+        return requirement, issues + build_issues
 
     def _read_cells(self, file_bytes: bytes) -> dict[str, object]:
         try:
@@ -147,36 +87,3 @@ class ExcelQuestionnaireParser:
             label = str(label_cell.value).strip().lower()
             values[label] = value_cell.value
         return values
-
-    def _coerce(self, raw_value: object, spec) -> object:
-        if spec.value_type == "str":
-            return str(raw_value).strip()
-
-        if spec.value_type == "int":
-            if isinstance(raw_value, bool):
-                raise ValueError("boolean given for an integer field")
-            return int(float(raw_value)) if isinstance(raw_value, str) else int(raw_value)
-
-        if spec.value_type == "float":
-            if isinstance(raw_value, bool):
-                raise ValueError("boolean given for a float field")
-            return float(raw_value)
-
-        if spec.value_type == "bool":
-            if isinstance(raw_value, bool):
-                return raw_value
-            text = str(raw_value).strip().lower()
-            if text in _TRUE_STRINGS:
-                return True
-            if text in _FALSE_STRINGS:
-                return False
-            raise ValueError(f"'{raw_value}' is not a recognized boolean")
-
-        if spec.value_type == "enum":
-            text = str(raw_value).strip()
-            for choice in spec.choices or []:
-                if choice.lower() == text.lower():
-                    return choice
-            raise ValueError(f"'{raw_value}' is not one of {spec.choices}")
-
-        raise ValueError(f"Unknown field type '{spec.value_type}'")
