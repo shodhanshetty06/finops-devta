@@ -20,6 +20,7 @@ import re
 
 from app.domain.assumption import Assumption
 from app.domain.enums import BackupFrequency, CloudSqlEngine, Region
+from app.domain.region_resolution import resolve_region
 from app.domain.requirements import (
     AvailabilityRequirement,
     BusinessContext,
@@ -96,25 +97,32 @@ class NaturalLanguageRequirementExtractor:
         return requirement, notes
 
     def _extract_region(self, lower: str, region_hint: str | None, notes: list[Assumption]) -> Region:
-        if region_hint:
-            try:
-                return Region(region_hint)
-            except ValueError:
-                pass
+        # Same 3-tier priority as every other intake path - see
+        # app/domain/region_resolution.py: an explicit hint wins, then a
+        # region phrase detected in the text, then the application default.
+        # This used to be its own hand-rolled version of that same chain;
+        # unified so there is exactly one place the priority order lives.
+        matched_keyword: str | None = None
+        keyword_region: str | None = None
         for keyword, region in _REGION_KEYWORDS:
             if keyword in lower:
-                notes.append(Assumption(
-                    field="region", requested_value="(extracted from free text)", used_value=region.value,
-                    reason=f"Detected the phrase '{keyword.strip()}' in the provided text.",
-                    strategy_applied="nlp_extraction",
-                ))
-                return region
-        notes.append(Assumption(
-            field="region", requested_value="(not mentioned in text)", used_value=Region.ASIA_SOUTH1.value,
-            reason="No region or location was mentioned in the text; defaulted to asia-south1.",
-            strategy_applied="nlp_extraction",
-        ))
-        return Region.ASIA_SOUTH1
+                matched_keyword, keyword_region = keyword, region.value
+                break
+
+        resolved, source = resolve_region(region_hint, keyword_region)
+        if source == "workbook":
+            notes.append(Assumption(
+                field="region", requested_value="(extracted from free text)", used_value=resolved.value,
+                reason=f"Detected the phrase '{matched_keyword.strip()}' in the provided text.",
+                strategy_applied="nlp_extraction",
+            ))
+        elif source == "default":
+            notes.append(Assumption(
+                field="region", requested_value="(not mentioned in text)", used_value=resolved.value,
+                reason="No region or location was mentioned in the text; defaulted to asia-south1.",
+                strategy_applied="nlp_extraction",
+            ))
+        return resolved
 
     def _extract_business_context(self, lower: str, original_text: str, notes: list[Assumption]) -> BusinessContext:
         peak = None

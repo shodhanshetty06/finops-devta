@@ -349,15 +349,36 @@ def find_cloud_sql_ram_sku(skus: list[GcpSku], region: str) -> GcpSku:
 
 
 def find_cloud_sql_storage_sku(skus: list[GcpSku], region: str) -> GcpSku:
+    # Deliberately does NOT gate on `resource_family == "ApplicationServices"`
+    # the way the other Cloud SQL matchers above do. That assumption was
+    # never verified against a live credential (see module docstring) and
+    # turned out to be wrong in production: real Cloud SQL storage SKUs were
+    # rejected outright because their resourceFamily isn't "ApplicationServices"
+    # (unlike Cloud SQL's own vCPU/RAM/named-tier SKUs, which do use that
+    # family and are unaffected by this change). Dropping the gate here is
+    # safe, not looser matching in disguise: `skus` is already scoped to
+    # nothing but the Cloud SQL service by the caller (`_get_skus`, which
+    # calls `find_service("Cloud SQL")` then lists only that service's SKUs),
+    # so no other service's SKU can leak in regardless of resource_family.
+    # The explicit exclusions below do the real job `_looks_like_ssd_storage`
+    # needs - keeping this matcher from ever picking Cloud SQL's compute,
+    # backup, or HDD-storage SKUs instead.
     candidates = [
         s for s in skus
-        if s.resource_family == "ApplicationServices"
-        and s.service_display_name == "Cloud SQL"
-        and "storage" in s.description.lower()
-        and "ssd" in s.description.lower()
+        if s.service_display_name == "Cloud SQL"
+        and _looks_like_cloud_sql_ssd_storage(s)
         and _region_matches(s, region)
     ]
     return _select_unique(candidates, f"Cloud SQL SSD storage ({region})")
+
+
+def _looks_like_cloud_sql_ssd_storage(sku: GcpSku) -> bool:
+    description = sku.description.lower()
+    if any(term in description for term in ("backup", "snapshot", "hdd", "binary log")):
+        return False
+    if any(term in description for term in ("cpu", "vcpu", "ram", "memory", "instance")):
+        return False
+    return "storage" in description and "ssd" in description
 
 
 def find_cloud_sql_backup_storage_sku(skus: list[GcpSku], region: str) -> GcpSku:

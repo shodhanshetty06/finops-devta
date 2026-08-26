@@ -19,6 +19,7 @@ from app.domain.enums import (
     ProvisioningModel,
     Region,
 )
+from app.domain.region_resolution import DEFAULT_REGION
 
 
 class ComputeRequirement(BaseModel):
@@ -189,7 +190,7 @@ class CustomerRequirement(BaseModel):
     """The full, un-trusted customer questionnaire submission."""
 
     project_name: str
-    region: Region = Region.ASIA_SOUTH1
+    region: Region = DEFAULT_REGION
     normalization_strategy: str | None = None  # overrides server default if set
 
     compute: ComputeRequirement | None = None

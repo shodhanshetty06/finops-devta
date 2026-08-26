@@ -78,7 +78,7 @@ async def upload_excel_questionnaire(
     settings: Settings = Depends(get_settings),
 ):
     file_bytes = await read_upload_bounded(file, settings.max_upload_size_bytes)
-    requirement, issues, notes, source = extraction_service.extract(file_bytes)
+    requirement, issues, notes, source, region_source = extraction_service.extract(file_bytes)
 
     estimate = None
     if auto_estimate and requirement is not None:
@@ -86,7 +86,10 @@ async def upload_excel_questionnaire(
             estimation_service, requirement, issues, force=force, commitment_term_years=commitment_term_years,
         )
 
-    return IntakeResponse(requirement=requirement, issues=issues, notes=notes, estimate=estimate, extraction_source=source)
+    return IntakeResponse(
+        requirement=requirement, issues=issues, notes=notes, estimate=estimate,
+        extraction_source=source, region_source=region_source,
+    )
 
 
 @router.post(

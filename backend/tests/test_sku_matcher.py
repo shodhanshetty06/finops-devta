@@ -243,6 +243,31 @@ def test_find_cloud_sql_storage_sku():
     assert sku.base_unit_price() == pytest.approx(0.17)
 
 
+def test_find_cloud_sql_storage_sku_does_not_require_applicationservices_family():
+    # Regression test: production Cloud SQL storage SKUs were rejected
+    # because they don't actually carry resource_family="ApplicationServices"
+    # the way this platform's fixtures (and the old matcher) assumed - see
+    # the comment on find_cloud_sql_storage_sku. This fixture set mirrors
+    # that: storage uses a different family than the compute/RAM/named-tier
+    # SKUs, and the matcher must still find it - while still correctly
+    # ignoring HDD storage, backups, and the compute/RAM SKUs alongside it.
+    fixtures = [
+        _sku("Cloud SQL for MySQL: Micro instance", family="ApplicationServices", service="Cloud SQL", price=0.015),
+        _sku("Cloud SQL for MySQL: Custom vCPU in Americas", family="ApplicationServices", service="Cloud SQL", price=0.0413),
+        _sku("Cloud SQL for MySQL: SSD storage in Americas", family="Storage", service="Cloud SQL", price=0.17),
+        _sku("Cloud SQL for MySQL: HDD storage in Americas", family="Storage", service="Cloud SQL", price=0.09),
+        _sku("Cloud SQL for MySQL: Backup storage in Americas", family="Storage", service="Cloud SQL", price=0.08),
+    ]
+    sku = m.find_cloud_sql_storage_sku(fixtures, "us-central1")
+    assert sku.base_unit_price() == pytest.approx(0.17)
+
+
+def test_find_cloud_sql_storage_sku_raises_clear_error_when_nothing_matches():
+    fixtures = [_sku("Cloud SQL for MySQL: Micro instance", family="ApplicationServices", service="Cloud SQL", price=0.015)]
+    with pytest.raises(PricingProviderError, match="No Cloud Billing Catalog SKU matched"):
+        m.find_cloud_sql_storage_sku(fixtures, "us-central1")
+
+
 # -- OS Licensing ---------------------------------------------------------
 
 LICENSE_FIXTURES = [

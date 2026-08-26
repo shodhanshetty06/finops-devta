@@ -554,6 +554,11 @@ export interface IntakeResponse {
   // "ai" - an arbitrary customer layout was understood via Groq extraction.
   // "unrecognized" - neither path could confidently identify a requirement.
   extraction_source: "template" | "ai" | "unrecognized";
+  // Where requirement.region came from: "workbook" (an explicit region cell/
+  // hint was found) or "default" (the app default was used - see backend
+  // app/domain/region_resolution.py). Never "selected" here - that only
+  // happens once the user picks a region in the UI, after seeing this response.
+  region_source: "workbook" | "default";
 }
 
 // -- Catalog (backend/app/catalog/models.py) -----------------------------

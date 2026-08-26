@@ -3,6 +3,7 @@ import io
 
 from openpyxl import load_workbook
 
+from app.domain.region_resolution import DEFAULT_REGION
 from app.intake.excel_parser import ExcelQuestionnaireParser
 from app.intake.excel_template import ExcelTemplateGenerator
 from app.intake.schema import FIELD_SCHEMA
@@ -65,9 +66,11 @@ def test_full_round_trip_all_sections_populated():
         "Backup Frequency": "daily",
     })
 
-    req, issues = ExcelQuestionnaireParser().parse(filled)
+    req, issues, region_source = ExcelQuestionnaireParser().parse(filled)
 
     assert issues == []
+    assert region_source == "workbook"
+    assert req.region.value == "us-central1"
     assert req.project_name == "Retail Inventory API"
     assert req.compute.vcpu == 4 and req.compute.ram_gb == 16
     assert req.storage.size_gb == 157 and req.storage.snapshot_enabled is True
@@ -87,7 +90,7 @@ def test_partial_section_is_dropped_with_blocker_but_other_sections_survive():
         "Snapshot Enabled": "TRUE",
     })
 
-    req, issues = ExcelQuestionnaireParser().parse(filled)
+    req, issues, _region_source = ExcelQuestionnaireParser().parse(filled)
 
     assert req is not None
     assert req.compute is not None and req.compute.vcpu == 4
@@ -105,7 +108,7 @@ def test_invalid_cell_values_are_skipped_not_fatal():
         "Machine Family": "does-not-exist",
     })
 
-    req, issues = ExcelQuestionnaireParser().parse(filled)
+    req, issues, _region_source = ExcelQuestionnaireParser().parse(filled)
 
     assert req is not None  # project still parses
     assert req.compute is None  # vcpu never made it in, so the section can't be built
@@ -118,13 +121,18 @@ def test_missing_project_name_gets_an_auto_default_with_a_warning():
     wb = _blank_workbook()
     filled = _fill_and_save(wb, {"vCPU": 4, "RAM (GB)": 16})
 
-    req, issues = ExcelQuestionnaireParser().parse(filled)
+    req, issues, region_source = ExcelQuestionnaireParser().parse(filled)
 
     assert req is not None  # a blank Project Name no longer blocks parsing/pricing
     assert req.project_name.startswith("Quick Estimate")
     assert req.compute is not None and req.compute.vcpu == 4
     assert any(i.severity.value == "warning" and "Project Name" in i.field for i in issues)
     assert not any(i.severity.value == "blocker" and "Project Name" in i.field for i in issues)
+    # No "Region" cell was filled in this workbook - must resolve to the
+    # application default (see app/domain/region_resolution.py), not error
+    # out or silently leave the field unset.
+    assert region_source == "default"
+    assert req.region == DEFAULT_REGION
 
 
 def test_unreadable_file_raises_intake_parse_error():
@@ -140,7 +148,7 @@ def test_unreadable_file_raises_intake_parse_error():
 
 def test_blank_workbook_produces_default_named_requirement_and_no_crash():
     blank_bytes = ExcelTemplateGenerator().generate()
-    req, issues = ExcelQuestionnaireParser().parse(blank_bytes)
+    req, issues, _region_source = ExcelQuestionnaireParser().parse(blank_bytes)
     assert req is not None
     assert req.project_name.startswith("Quick Estimate")
     assert not any(i.severity.value == "blocker" for i in issues)

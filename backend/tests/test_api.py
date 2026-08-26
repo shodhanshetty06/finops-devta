@@ -74,6 +74,42 @@ def test_estimate_endpoint_business_only():
     assert body["cost"]["total_monthly"] > 0
 
 
+def test_estimate_endpoint_region_query_param_overrides_requirement_region():
+    # The backend is the final authority on region (app/domain/region_resolution.py):
+    # an explicit `region` query param always wins over whatever the submitted
+    # requirement.region already says.
+    payload = {
+        "project_name": "Region Override Test",
+        "region": "us-central1",
+        "compute": {"machine_family": "e2", "vcpu": 2, "ram_gb": 8},
+    }
+    resp = client.post("/api/v1/estimate", json=payload, params={"region": "asia-south1"})
+    assert resp.status_code == 200
+    assert resp.json()["normalized_spec"]["region"] == "asia-south1"
+
+
+def test_estimate_endpoint_uses_requirement_region_when_no_override_given():
+    payload = {
+        "project_name": "No Override Test",
+        "region": "europe-west1",
+        "compute": {"machine_family": "e2", "vcpu": 2, "ram_gb": 8},
+    }
+    resp = client.post("/api/v1/estimate", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["normalized_spec"]["region"] == "europe-west1"
+
+
+def test_estimate_endpoint_rejects_invalid_region_override_clearly():
+    payload = {
+        "project_name": "Bad Override Test",
+        "region": "us-central1",
+        "compute": {"machine_family": "e2", "vcpu": 2, "ram_gb": 8},
+    }
+    resp = client.post("/api/v1/estimate", json=payload, params={"region": "not-a-real-region"})
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_region"
+
+
 def test_openapi_docs_available():
     resp = client.get("/openapi.json")
     assert resp.status_code == 200

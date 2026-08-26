@@ -76,7 +76,7 @@ def _groq_handler(request: httpx.Request) -> httpx.Response:
 
 def test_full_pipeline_excel_upload_through_groq_explained_reports(catalog, pricing_provider, settings):
     # 1) Excel Upload + Parse
-    requirement, issues = ExcelQuestionnaireParser().parse(_filled_questionnaire_bytes())
+    requirement, issues, _region_source = ExcelQuestionnaireParser().parse(_filled_questionnaire_bytes())
     assert issues == []
     assert requirement.compute.vcpu == 3
 
@@ -117,7 +117,7 @@ def test_full_pipeline_falls_back_to_deterministic_text_when_groq_unavailable(ca
     # Same pipeline, but Groq is entirely unconfigured (provider=None, the
     # exact state of a deployment with no GROQ_API_KEY set). Pricing and
     # report generation must still complete successfully end to end.
-    requirement, issues = ExcelQuestionnaireParser().parse(_filled_questionnaire_bytes())
+    requirement, issues, _region_source = ExcelQuestionnaireParser().parse(_filled_questionnaire_bytes())
     assert issues == []
 
     estimate = EstimationService(catalog=catalog, pricing_provider=pricing_provider, settings=settings).generate_estimate(requirement)
@@ -136,7 +136,7 @@ def test_full_pipeline_renders_report_in_user_selected_currency(catalog, pricing
     # The report must render in whatever currency the user selected
     # (target_currency) - converted for display only, via the real
     # CurrencyConverter (mocked HTTP), never re-priced or invented by Groq.
-    requirement, issues = ExcelQuestionnaireParser().parse(_filled_questionnaire_bytes())
+    requirement, issues, _region_source = ExcelQuestionnaireParser().parse(_filled_questionnaire_bytes())
     assert issues == []
     estimate = EstimationService(catalog=catalog, pricing_provider=pricing_provider, settings=settings).generate_estimate(requirement)
     assert estimate.cost.currency == "USD"

@@ -101,26 +101,29 @@ class ExtractionService:
         self._provider = provider
         self.model = model
 
-    def extract(self, file_bytes: bytes) -> tuple[CustomerRequirement | None, list[ParseIssue], list[Assumption], str]:
-        """Returns (requirement, issues, assumptions, source). `source` is
-        "template" when the platform's own strict parser recognized the
-        workbook (no LLM call made at all), "ai" when Groq extraction
-        produced a usable requirement, or "unrecognized" when neither did."""
-        requirement, template_issues = ExcelQuestionnaireParser().parse(file_bytes)
+    def extract(self, file_bytes: bytes) -> tuple[CustomerRequirement | None, list[ParseIssue], list[Assumption], str, str]:
+        """Returns (requirement, issues, assumptions, source, region_source).
+        `source` is "template" when the platform's own strict parser
+        recognized the workbook (no LLM call made at all), "ai" when Groq
+        extraction produced a usable requirement, or "unrecognized" when
+        neither did. `region_source` is "workbook" or "default" - see
+        app/domain/region_resolution.py; "default" whenever `requirement`
+        is None, since there's nothing to label in that case."""
+        requirement, template_issues, region_source = ExcelQuestionnaireParser().parse(file_bytes)
         template_sections = {
             key: getattr(requirement, key).model_dump() if requirement and getattr(requirement, key) else None
             for key in ("compute", "storage", "database", "network", "kubernetes", "availability", "business")
         }
         if has_any_section(template_sections):
-            return requirement, template_issues, [], "template"
+            return requirement, template_issues, [], "template", region_source
 
         if self._provider is None:
-            return None, [ParseIssue(field="workbook", message=UNMAPPABLE_MESSAGE, severity=Severity.BLOCKER)], [], "unrecognized"
+            return None, [ParseIssue(field="workbook", message=UNMAPPABLE_MESSAGE, severity=Severity.BLOCKER)], [], "unrecognized", "default"
 
         workbook_text = dump_workbook_text(file_bytes)
         parsed = self._complete(workbook_text)
         if parsed is None:
-            return None, [ParseIssue(field="workbook", message=UNMAPPABLE_MESSAGE, severity=Severity.BLOCKER)], [], "unrecognized"
+            return None, [ParseIssue(field="workbook", message=UNMAPPABLE_MESSAGE, severity=Severity.BLOCKER)], [], "unrecognized", "default"
 
         return self._build_from_extraction(parsed)
 
@@ -142,7 +145,7 @@ class ExtractionService:
 
     # -- Turning Groq's JSON into a validated CustomerRequirement --------------
 
-    def _build_from_extraction(self, parsed: dict) -> tuple[CustomerRequirement | None, list[ParseIssue], list[Assumption], str]:
+    def _build_from_extraction(self, parsed: dict) -> tuple[CustomerRequirement | None, list[ParseIssue], list[Assumption], str, str]:
         issues: list[ParseIssue] = []
         top_level: dict = {}
         sections: dict[str, dict] = {}
@@ -203,10 +206,10 @@ class ExtractionService:
 
         if not has_any_section(sections):
             issues.append(ParseIssue(field="workbook", message=UNMAPPABLE_MESSAGE, severity=Severity.BLOCKER))
-            return None, issues, assumptions, "unrecognized"
+            return None, issues, assumptions, "unrecognized", "default"
 
-        requirement, build_issues = build_customer_requirement(top_level, sections)
-        return requirement, issues + build_issues, assumptions, "ai"
+        requirement, build_issues, region_source = build_customer_requirement(top_level, sections)
+        return requirement, issues + build_issues, assumptions, "ai", region_source
 
 
 def get_extraction_service() -> ExtractionService:

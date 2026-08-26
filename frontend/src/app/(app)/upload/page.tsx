@@ -127,10 +127,12 @@ export default function UploadExcelPage() {
     if (!response?.requirement) return;
     setIsPricing(true);
     try {
-      // Region override is opt-in: if the user picked one above it wins,
-      // otherwise the region already parsed from the workbook is used as-is.
+      // The backend is the final authority on the resolved region (see
+      // app/domain/region_resolution.py) - the override is sent as its own
+      // param rather than pre-merged here, so the same priority (selected >
+      // workbook > default) is enforced in one place regardless of caller.
+      const estimate = await estimateApi.create(response.requirement, { force, region: selectedRegion ?? undefined });
       const requirement = selectedRegion ? { ...response.requirement, region: selectedRegion } : response.requirement;
-      const estimate = await estimateApi.create(requirement, { force });
       setState((prev) => ({ ...prev, response: prev.response ? { ...prev.response, requirement, estimate } : prev.response }));
       toast.success("Priced successfully");
     } catch (err) {
@@ -138,6 +140,13 @@ export default function UploadExcelPage() {
     } finally {
       setIsPricing(false);
     }
+  }
+
+  function regionStatusLabel(): string {
+    if (selectedRegion) return `Pricing region: ${selectedRegion} (Selected by you)`;
+    if (!response?.requirement) return "";
+    if (response.region_source === "workbook") return `Pricing region: ${response.requirement.region} (From workbook)`;
+    return `Pricing region: ${response.requirement.region} (Default)`;
   }
 
   return (
@@ -273,14 +282,12 @@ export default function UploadExcelPage() {
           {response.requirement && !response.estimate && (
             <Card>
               <CardHeader>
-                <CardTitle>3. Region &amp; pricing (optional)</CardTitle>
-                <CardDescription>
-                  By default pricing uses the region from your workbook. Only pick one below to override it.
-                </CardDescription>
+                <CardTitle>3. Region &amp; pricing</CardTitle>
+                <CardDescription>{regionStatusLabel()}</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5 sm:max-w-xs">
-                  <Label htmlFor="region">Region override</Label>
+                  <Label htmlFor="region">Region</Label>
                   <Select
                     id="region"
                     value={selectedRegion ?? ""}
@@ -288,7 +295,9 @@ export default function UploadExcelPage() {
                       setState((prev) => ({ ...prev, selectedRegion: (e.target.value || null) as RegionCode | null }))
                     }
                   >
-                    <option value="">Use region from workbook</option>
+                    <option value="">
+                      {response.region_source === "workbook" ? `From workbook (${response.requirement.region})` : `Default (${response.requirement.region})`}
+                    </option>
                     {REGIONS.map((r) => (
                       <option key={r} value={r}>
                         {r}

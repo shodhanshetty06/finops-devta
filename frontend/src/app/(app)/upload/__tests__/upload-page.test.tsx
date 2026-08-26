@@ -66,7 +66,10 @@ function minimalRequirement(region: string, projectName: string) {
 }
 
 function stubResponse(region: string, projectName: string, source: IntakeResponse["extraction_source"] = "template"): IntakeResponse {
-  return { requirement: minimalRequirement(region, projectName) as never, issues: [], notes: [], estimate: null, extraction_source: source };
+  return {
+    requirement: minimalRequirement(region, projectName) as never, issues: [], notes: [], estimate: null,
+    extraction_source: source, region_source: "workbook",
+  };
 }
 
 function stubEstimate(region: string): EstimateResult {
@@ -131,10 +134,10 @@ describe("Upload Excel page - isolation and region guarantees", () => {
 
     renderPage();
     selectFile("region.xlsx");
-    await waitFor(() => expect(screen.getByLabelText("Region override")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Region")).toBeTruthy());
 
     // No region is preselected - the override is opt-in, not defaulted.
-    expect((screen.getByLabelText("Region override") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("Region") as HTMLSelectElement).value).toBe("");
     fireEvent.click(screen.getByText("Calculate Price"));
 
     await waitFor(() => expect(estimateApi.create).toHaveBeenCalled());
@@ -148,21 +151,24 @@ describe("Upload Excel page - isolation and region guarantees", () => {
 
     renderPage();
     selectFile("region.xlsx");
-    await waitFor(() => expect(screen.getByLabelText("Region override")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Region")).toBeTruthy());
 
-    fireEvent.change(screen.getByLabelText("Region override"), { target: { value: "us-west1" } });
+    fireEvent.change(screen.getByLabelText("Region"), { target: { value: "us-west1" } });
     fireEvent.click(screen.getByText("Calculate Price"));
 
     await waitFor(() => expect(estimateApi.create).toHaveBeenCalled());
-    const [sentRequirement] = vi.mocked(estimateApi.create).mock.calls[0];
-    expect(sentRequirement.region).toBe("us-west1");
+    // The backend is the final authority on region (see
+    // app/domain/region_resolution.py) - the override is sent as its own
+    // param rather than pre-merged into the requirement client-side.
+    const [, opts] = vi.mocked(estimateApi.create).mock.calls[0];
+    expect(opts?.region).toBe("us-west1");
   });
 
   it("shows a clear review message, not a raw error, when nothing could be confidently identified", async () => {
     vi.mocked(intakeApi.uploadExcel).mockResolvedValueOnce({
       requirement: null,
       issues: [{ field: "workbook", message: "We could not confidently identify the required cloud resources from this workbook. Please review the extracted requirements below, correct or add anything that's missing, or download the standard template and fill it in directly.", severity: "blocker" }],
-      notes: [], estimate: null, extraction_source: "unrecognized",
+      notes: [], estimate: null, extraction_source: "unrecognized", region_source: "default",
     });
 
     renderPage();

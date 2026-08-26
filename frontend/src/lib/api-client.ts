@@ -115,10 +115,14 @@ export const estimateApi = {
   validate: (requirement: CustomerRequirement) =>
     http.post<ValidationReport>("/api/v1/validate", requirement).then((r) => r.data),
 
-  create: (requirement: CustomerRequirement, opts?: { force?: boolean; commitmentTermYears?: number }) =>
+  create: (requirement: CustomerRequirement, opts?: { force?: boolean; commitmentTermYears?: number; region?: string }) =>
     http
       .post<EstimateResult>("/api/v1/estimate", requirement, {
-        params: { force: opts?.force ?? false, commitment_term_years: opts?.commitmentTermYears ?? 0 },
+        params: {
+          force: opts?.force ?? false,
+          commitment_term_years: opts?.commitmentTermYears ?? 0,
+          region: opts?.region,
+        },
       })
       .then((r) => r.data),
 };

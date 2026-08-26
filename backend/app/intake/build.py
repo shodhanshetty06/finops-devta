@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from app.domain.enums import Severity
 from app.domain.intake import ParseIssue
+from app.domain.region_resolution import resolve_region
 from app.domain.requirements import (
     AvailabilityRequirement,
     BusinessContext,
@@ -83,15 +84,30 @@ def coerce_value(raw_value: object, spec) -> object:
 
 def build_customer_requirement(
     top_level: dict, sections: dict[str, dict],
-) -> tuple[CustomerRequirement | None, list[ParseIssue]]:
+) -> tuple[CustomerRequirement | None, list[ParseIssue], str]:
     """`top_level` holds CustomerRequirement's own fields (project_name,
     region, ...); `sections` maps a SECTION_MODELS key (e.g. "compute") to
     that section's raw field values. A missing/empty section is left out of
     the result entirely (None) rather than defaulted - only a section the
     customer (or the extractor, on their behalf) actually provided data for
-    is ever priced."""
+    is ever priced.
+
+    The single entry point for the "workbook region vs. application default"
+    half of the region priority chain (see app/domain/region_resolution.py) -
+    both intake paths (the strict template parser and the Groq extractor)
+    only ever hand this function a `top_level["region"]` that was already
+    validated against the Region enum upstream (or omitted entirely), so
+    this never has an invalid candidate to reject; it only ever decides
+    workbook-value-vs-default and labels which one was used. The remaining
+    "explicit user override" step happens later, at estimate-creation time,
+    once the user has actually seen this result and can choose to override
+    it - see the `region` query param on POST /api/v1/estimate.
+    Returns the third element as the resolved region's source:
+    "workbook" or "default" ("selected" never applies at parse time)."""
     issues: list[ParseIssue] = []
     top_level = dict(top_level)
+    resolved_region, region_source = resolve_region(None, top_level.get("region"))
+    top_level["region"] = resolved_region
 
     if not str(top_level.get("project_name") or "").strip():
         default_name = f"Quick Estimate {datetime.now(timezone.utc):%Y-%m-%d %H:%M UTC}"
@@ -128,9 +144,9 @@ def build_customer_requirement(
             issues.append(ParseIssue(
                 field=".".join(str(p) for p in err["loc"]), message=err["msg"], severity=Severity.BLOCKER,
             ))
-        return None, issues
+        return None, issues, region_source
 
-    return requirement, issues
+    return requirement, issues, region_source
 
 
 def has_any_section(sections: dict[str, dict | None]) -> bool:

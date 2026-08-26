@@ -28,7 +28,7 @@ from app.intake.schema import FIELD_SCHEMA, SECTION_KEYS
 
 
 class ExcelQuestionnaireParser:
-    def parse(self, file_bytes: bytes) -> tuple[CustomerRequirement | None, list[ParseIssue]]:
+    def parse(self, file_bytes: bytes) -> tuple[CustomerRequirement | None, list[ParseIssue], str]:
         raw_values = self._read_cells(file_bytes)
         issues: list[ParseIssue] = []
 
@@ -58,8 +58,8 @@ class ExcelQuestionnaireParser:
                 section_key, field_key = spec.path
                 sections[section_key][field_key] = coerced
 
-        requirement, build_issues = build_customer_requirement(top_level, sections)
-        return requirement, issues + build_issues
+        requirement, build_issues, region_source = build_customer_requirement(top_level, sections)
+        return requirement, issues + build_issues, region_source
 
     def _read_cells(self, file_bytes: bytes) -> dict[str, object]:
         try:

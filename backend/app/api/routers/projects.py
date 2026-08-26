@@ -296,7 +296,7 @@ async def create_estimate_version_from_excel(
     settings: Settings = Depends(get_settings),
 ):
     file_bytes = await read_upload_bounded(file, settings.max_upload_size_bytes)
-    requirement, issues, _notes, _source = extraction_service.extract(file_bytes)
+    requirement, issues, _notes, _source, _region_source = extraction_service.extract(file_bytes)
     if requirement is None:
         detail = "; ".join(f"{i.field}: {i.message}" for i in issues) or "no usable fields were found"
         raise IntakeParseError(f"The questionnaire could not be parsed ({detail}).")

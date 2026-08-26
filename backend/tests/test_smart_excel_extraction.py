@@ -95,7 +95,7 @@ def test_template_layout_never_calls_groq():
     wb.save(buf)
 
     service = ExtractionService(provider=_ExplodingProvider(), model="x")
-    requirement, issues, notes, source = service.extract(buf.getvalue())
+    requirement, issues, notes, source, region_source = service.extract(buf.getvalue())
     assert source == "template"
     assert requirement.compute.vcpu == 4
     assert notes == []
@@ -107,7 +107,7 @@ def test_arbitrary_layout_extracted_via_groq():
     provider = GroqProvider("test-key", "llama-3.1-8b-instant", transport=_mock_extraction_transport(_GOOD_EXTRACTION_RESPONSE))
     service = ExtractionService(provider=provider, model="llama-3.1-8b-instant")
 
-    requirement, issues, notes, source = service.extract(_arbitrary_workbook_bytes())
+    requirement, issues, notes, source, region_source = service.extract(_arbitrary_workbook_bytes())
 
     assert source == "ai"
     assert requirement is not None
@@ -163,7 +163,7 @@ def test_groq_price_injection_attempt_is_ignored_by_schema(catalog, pricing_prov
 
     provider = GroqProvider("test-key", "llama-3.1-8b-instant", transport=_mock_extraction_transport(injected))
     service = ExtractionService(provider=provider, model="llama-3.1-8b-instant")
-    requirement, issues, notes, source = service.extract(_arbitrary_workbook_bytes())
+    requirement, issues, notes, source, region_source = service.extract(_arbitrary_workbook_bytes())
 
     assert requirement is not None
     assert not hasattr(requirement, "price_per_month")
@@ -183,7 +183,7 @@ def test_partially_invalid_section_is_flagged_not_hallucinated():
 
     provider = GroqProvider("test-key", "llama-3.1-8b-instant", transport=_mock_extraction_transport(bad))
     service = ExtractionService(provider=provider, model="llama-3.1-8b-instant")
-    requirement, issues, notes, source = service.extract(_arbitrary_workbook_bytes())
+    requirement, issues, notes, source, region_source = service.extract(_arbitrary_workbook_bytes())
 
     # vcpu could not be interpreted -> flagged as a warning, compute.vcpu never guessed at.
     assert any("vCPU" in i.field and i.severity.value == "warning" for i in issues)
@@ -198,7 +198,7 @@ def test_partially_invalid_section_is_flagged_not_hallucinated():
 
 def test_groq_unconfigured_returns_clear_review_message_not_a_crash():
     service = ExtractionService(provider=None, model=None)
-    requirement, issues, notes, source = service.extract(_arbitrary_workbook_bytes())
+    requirement, issues, notes, source, region_source = service.extract(_arbitrary_workbook_bytes())
 
     assert requirement is None
     assert source == "unrecognized"
@@ -211,7 +211,7 @@ def test_groq_api_failure_falls_back_gracefully():
 
     provider = GroqProvider("test-key", "llama-3.1-8b-instant", transport=httpx.MockTransport(failing_handler))
     service = ExtractionService(provider=provider, model="llama-3.1-8b-instant")
-    requirement, issues, notes, source = service.extract(_arbitrary_workbook_bytes())
+    requirement, issues, notes, source, region_source = service.extract(_arbitrary_workbook_bytes())
 
     assert requirement is None
     assert source == "unrecognized"
@@ -224,7 +224,7 @@ def test_groq_garbage_response_falls_back_gracefully():
 
     provider = GroqProvider("test-key", "llama-3.1-8b-instant", transport=httpx.MockTransport(garbage_handler))
     service = ExtractionService(provider=provider, model="llama-3.1-8b-instant")
-    requirement, issues, notes, source = service.extract(_arbitrary_workbook_bytes())
+    requirement, issues, notes, source, region_source = service.extract(_arbitrary_workbook_bytes())
 
     assert requirement is None
     assert source == "unrecognized"
