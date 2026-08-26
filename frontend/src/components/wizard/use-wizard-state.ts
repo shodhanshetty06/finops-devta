@@ -86,7 +86,7 @@ const DEFAULT_BUSINESS: BusinessContext = {
 export function emptyRequirement(): CustomerRequirement {
   return {
     project_name: "",
-    region: "us-central1",
+    region: "asia-south1",
     normalization_strategy: getDefaultNormalizationStrategy(),
     compute: null,
     storage: null,

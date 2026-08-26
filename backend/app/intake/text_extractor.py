@@ -110,11 +110,11 @@ class NaturalLanguageRequirementExtractor:
                 ))
                 return region
         notes.append(Assumption(
-            field="region", requested_value="(not mentioned in text)", used_value=Region.US_CENTRAL1.value,
-            reason="No region or location was mentioned in the text; defaulted to us-central1.",
+            field="region", requested_value="(not mentioned in text)", used_value=Region.ASIA_SOUTH1.value,
+            reason="No region or location was mentioned in the text; defaulted to asia-south1.",
             strategy_applied="nlp_extraction",
         ))
-        return Region.US_CENTRAL1
+        return Region.ASIA_SOUTH1
 
     def _extract_business_context(self, lower: str, original_text: str, notes: list[Assumption]) -> BusinessContext:
         peak = None

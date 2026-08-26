@@ -65,7 +65,7 @@ describe("useWizardState", () => {
     const { result } = renderHook(() => useWizardState());
     act(() => result.current.update("project_name", "My Project"));
     expect(result.current.requirement.project_name).toBe("My Project");
-    expect(result.current.requirement.region).toBe("us-central1");
+    expect(result.current.requirement.region).toBe("asia-south1");
   });
 
   it("goNext/goBack move within step bounds and never go out of range", () => {

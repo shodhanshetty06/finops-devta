@@ -189,7 +189,7 @@ class CustomerRequirement(BaseModel):
     """The full, un-trusted customer questionnaire submission."""
 
     project_name: str
-    region: Region = Region.US_CENTRAL1
+    region: Region = Region.ASIA_SOUTH1
     normalization_strategy: str | None = None  # overrides server default if set
 
     compute: ComputeRequirement | None = None
