@@ -19,8 +19,6 @@ import { apiErrorMessage, downloadReport, estimateApi, intakeApi, reportsApi } f
 import { cn } from "@/lib/utils";
 import { REGIONS, type EstimateResult, type IntakeResponse, type ParseIssue, type RegionCode } from "@/lib/types";
 
-const DEFAULT_REGION: RegionCode = "us-central1";
-
 function IssueIcon({ severity }: { severity: ParseIssue["severity"] }) {
   if (severity === "blocker") return <XCircle className="h-4 w-4 shrink-0" />;
   if (severity === "warning") return <AlertTriangle className="h-4 w-4 shrink-0" />;
@@ -78,7 +76,7 @@ function initialState() {
   return {
     selectedFileName: null as string | null,
     response: null as IntakeResponse | null,
-    selectedRegion: DEFAULT_REGION as RegionCode,
+    selectedRegion: null as RegionCode | null,
     saveDialogOpen: false,
   };
 }
@@ -107,11 +105,7 @@ export default function UploadExcelPage() {
     setIsUploading(true);
     try {
       const result = await intakeApi.uploadExcel(file, false);
-      setState((prev) => ({
-        ...prev,
-        response: result,
-        selectedRegion: (result.requirement?.region as RegionCode) ?? DEFAULT_REGION,
-      }));
+      setState((prev) => ({ ...prev, response: result }));
       if (result.requirement) {
         toast.success(
           result.extraction_source === "ai"
@@ -133,10 +127,9 @@ export default function UploadExcelPage() {
     if (!response?.requirement) return;
     setIsPricing(true);
     try {
-      // The region picked above always wins, however the workbook was
-      // parsed and regardless of anything a previous estimate (here or on
-      // the Quick Estimate page) used - never silently reused.
-      const requirement = { ...response.requirement, region: selectedRegion };
+      // Region override is opt-in: if the user picked one above it wins,
+      // otherwise the region already parsed from the workbook is used as-is.
+      const requirement = selectedRegion ? { ...response.requirement, region: selectedRegion } : response.requirement;
       const estimate = await estimateApi.create(requirement, { force });
       setState((prev) => ({ ...prev, response: prev.response ? { ...prev.response, requirement, estimate } : prev.response }));
       toast.success("Priced successfully");
@@ -280,19 +273,22 @@ export default function UploadExcelPage() {
           {response.requirement && !response.estimate && (
             <Card>
               <CardHeader>
-                <CardTitle>3. Region &amp; pricing</CardTitle>
+                <CardTitle>3. Region &amp; pricing (optional)</CardTitle>
                 <CardDescription>
-                  The selected region is always used for pricing, regardless of what the workbook contained.
+                  By default pricing uses the region from your workbook. Only pick one below to override it.
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5 sm:max-w-xs">
-                  <Label htmlFor="region">Region</Label>
+                  <Label htmlFor="region">Region override</Label>
                   <Select
                     id="region"
-                    value={selectedRegion}
-                    onChange={(e) => setState((prev) => ({ ...prev, selectedRegion: e.target.value as RegionCode }))}
+                    value={selectedRegion ?? ""}
+                    onChange={(e) =>
+                      setState((prev) => ({ ...prev, selectedRegion: (e.target.value || null) as RegionCode | null }))
+                    }
                   >
+                    <option value="">Use region from workbook</option>
                     {REGIONS.map((r) => (
                       <option key={r} value={r}>
                         {r}
@@ -324,7 +320,7 @@ export default function UploadExcelPage() {
               <div className="flex items-center justify-between gap-3">
                 <p className="flex items-center gap-2 text-sm text-success-700 dark:text-success-400">
                   <CheckCircle2 className="h-4 w-4" />
-                  Priced successfully in {selectedRegion}
+                  Priced successfully in {response.requirement?.region}
                 </p>
                 <div className="flex items-center gap-2">
                   <ExportEstimateButtons estimate={response.estimate} />

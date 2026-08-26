@@ -125,18 +125,32 @@ describe("Upload Excel page - isolation and region guarantees", () => {
     expect(screen.getByText(/Click to choose a .xlsx file/)).toBeTruthy();
   });
 
-  it("always prices with the user-selected region, overriding whatever region the workbook contained", async () => {
+  it("prices with the workbook's own region when the user leaves the region override unset", async () => {
+    vi.mocked(intakeApi.uploadExcel).mockResolvedValueOnce(stubResponse("asia-south1", "Region Test"));
+    vi.mocked(estimateApi.create).mockResolvedValueOnce(stubEstimate("asia-south1"));
+
+    renderPage();
+    selectFile("region.xlsx");
+    await waitFor(() => expect(screen.getByLabelText("Region override")).toBeTruthy());
+
+    // No region is preselected - the override is opt-in, not defaulted.
+    expect((screen.getByLabelText("Region override") as HTMLSelectElement).value).toBe("");
+    fireEvent.click(screen.getByText("Calculate Price"));
+
+    await waitFor(() => expect(estimateApi.create).toHaveBeenCalled());
+    const [sentRequirement] = vi.mocked(estimateApi.create).mock.calls[0];
+    expect(sentRequirement.region).toBe("asia-south1");
+  });
+
+  it("prices with the user-selected region when the override is explicitly set, ignoring the workbook's region", async () => {
     vi.mocked(intakeApi.uploadExcel).mockResolvedValueOnce(stubResponse("asia-south1", "Region Test"));
     vi.mocked(estimateApi.create).mockResolvedValueOnce(stubEstimate("us-west1"));
 
     renderPage();
     selectFile("region.xlsx");
-    await waitFor(() => expect(screen.getByLabelText("Region")).toBeTruthy());
+    await waitFor(() => expect(screen.getByLabelText("Region override")).toBeTruthy());
 
-    // The workbook's own extracted region seeds the selector...
-    expect((screen.getByLabelText("Region") as HTMLSelectElement).value).toBe("asia-south1");
-    // ...but the user's explicit choice is what's actually sent to pricing.
-    fireEvent.change(screen.getByLabelText("Region"), { target: { value: "us-west1" } });
+    fireEvent.change(screen.getByLabelText("Region override"), { target: { value: "us-west1" } });
     fireEvent.click(screen.getByText("Calculate Price"));
 
     await waitFor(() => expect(estimateApi.create).toHaveBeenCalled());
