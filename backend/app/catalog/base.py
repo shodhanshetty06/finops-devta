@@ -9,6 +9,7 @@ from app.catalog.models import (
     DiskTypeSpec,
     GkeConfig,
     GpuSpec,
+    MachineFamilyCapability,
     MachineTypeSpec,
     RegionSpec,
 )
@@ -17,6 +18,19 @@ from app.catalog.models import (
 class CatalogProvider(ABC):
     @abstractmethod
     def list_machine_types(self, family: str | None = None) -> list[MachineTypeSpec]: ...
+
+    @abstractmethod
+    def get_machine_type(self, name: str) -> MachineTypeSpec | None:
+        """Exact predefined machine type lookup by name (e.g. "n4-standard-4"),
+        used when a customer specifies `ComputeRequirement.machine_type`
+        directly rather than a vCPU/RAM shape."""
+        ...
+
+    @abstractmethod
+    def list_family_capabilities(self) -> list[MachineFamilyCapability]: ...
+
+    @abstractmethod
+    def get_family_capability(self, family: str) -> MachineFamilyCapability | None: ...
 
     @abstractmethod
     def list_disk_types(self) -> list[DiskTypeSpec]: ...

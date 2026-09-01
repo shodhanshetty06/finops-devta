@@ -19,6 +19,19 @@ def test_catalog_machine_types():
     assert all(m["family"] == "e2" for m in data)
 
 
+def test_catalog_machine_family_capabilities_exposes_region_availability():
+    """Frontend consumes this endpoint to show the custom-support/region
+    indicators on the Sizing step without waiting on a debounced /validate
+    call - `available_regions` must actually be present in the response."""
+    resp = client.get("/api/v1/catalog/machine-family-capabilities")
+    assert resp.status_code == 200
+    data = resp.json()
+    by_family = {c["family"]: c for c in data}
+    assert "available_regions" in by_family["n4a"]
+    assert by_family["n4a"]["available_regions"] == ["us-central1", "europe-west4"]
+    assert by_family["n2"]["available_regions"] is None
+
+
 def test_validate_endpoint():
     payload = {
         "project_name": "API Test",
@@ -58,6 +71,68 @@ def test_estimate_endpoint_blocks_on_blocker_without_force():
     resp = client.post("/api/v1/estimate", json=payload)
     assert resp.status_code == 422
     assert resp.json()["error"] == "validation_failed"
+
+
+def test_estimate_endpoint_predefined_machine_type_by_name():
+    payload = {
+        "project_name": "N4 Standard Test",
+        "region": "us-central1",
+        "compute": {"machine_family": "n4", "machine_type": "n4-standard-4", "instance_count": 1},
+    }
+    resp = client.post("/api/v1/estimate", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["normalized_spec"]["machine_type"] == "n4-standard-4"
+    assert body["normalized_spec"]["vcpu"] == 4 and body["normalized_spec"]["ram_gb"] == 16
+    assert body["normalized_spec"]["machine_type_kind"] == "predefined"
+
+
+def test_estimate_endpoint_custom_n2d_configuration():
+    payload = {
+        "project_name": "Custom N2D API Test",
+        "region": "asia-south1",
+        "compute": {"machine_family": "n2d", "machine_type_kind": "custom", "vcpu": 2, "ram_gb": 4},
+    }
+    resp = client.post("/api/v1/estimate", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["normalized_spec"]["machine_type_kind"] == "custom"
+    assert body["normalized_spec"]["vcpu"] == 2 and body["normalized_spec"]["ram_gb"] == 4
+    compute_line = next(li for li in body["cost"]["line_items"] if li["category"] == "Compute")
+    assert "custom" in compute_line["description"].lower()
+
+
+def test_estimate_endpoint_blocks_unsupported_custom_family_without_force():
+    # T2D does not support custom machine types on real Google Cloud.
+    payload = {
+        "project_name": "Unsupported Custom Family",
+        "region": "us-central1",
+        "compute": {"machine_family": "t2d", "machine_type_kind": "custom", "vcpu": 4, "ram_gb": 16},
+    }
+    resp = client.post("/api/v1/estimate", json=payload)
+    assert resp.status_code == 422
+    assert resp.json()["error"] == "validation_failed"
+
+
+def test_estimate_endpoint_rejects_missing_machine_type_and_sizing():
+    payload = {
+        "project_name": "Neither Machine Type Nor Sizing",
+        "region": "us-central1",
+        "compute": {"machine_family": "e2"},
+    }
+    resp = client.post("/api/v1/estimate", json=payload)
+    assert resp.status_code == 422  # Pydantic model validation, not the ValidationFailedError path
+
+
+def test_estimate_endpoint_normalizes_machine_family_separator_variant():
+    payload = {
+        "project_name": "Family Separator Variant",
+        "region": "us-central1",
+        "compute": {"machine_family": "N2-D", "vcpu": 4, "ram_gb": 16},
+    }
+    resp = client.post("/api/v1/estimate", json=payload)
+    assert resp.status_code == 200
+    assert resp.json()["normalized_spec"]["family"] == "n2d"
 
 
 def test_estimate_endpoint_business_only():

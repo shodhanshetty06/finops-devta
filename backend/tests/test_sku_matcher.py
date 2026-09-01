@@ -31,13 +31,18 @@ COMPUTE_FIXTURES = [
     _sku("N2 Instance Core running in Americas", regions=["us-central1", "us-east1"], price=0.031),
     _sku("N2 Instance Ram running in Americas", regions=["us-central1", "us-east1"], price=0.0042),
     _sku("N2 Custom Instance Core running in Americas", price=0.999),  # decoy: custom, not predefined
+    _sku("N2 Custom Instance Ram running in Americas", price=0.998),  # decoy: custom, not predefined
     _sku("Preemptible N2 Instance Core running in Americas", usage="Preemptible", price=0.01),  # decoy: wrong usage type
     _sku("N2 Instance Core running in EMEA", regions=["europe-west1"], price=0.034),  # decoy: wrong region
     _sku("E2 Instance Core running in Americas", price=0.021),
     _sku("E2 Instance Ram running in Americas", price=0.0028),
     _sku("N2D AMD Instance Core running in Americas", price=0.0271),
+    _sku("N2D AMD Instance Ram running in Americas", price=0.0036),
     _sku("Compute optimized Core running in Americas", price=0.0348),
     _sku("A2 Instance Core running in Americas", price=0.0315),
+    _sku("C4 Instance Core running in Americas", price=0.033),
+    _sku("C4D AMD Instance Core running in Americas", price=0.029),
+    _sku("C4A Arm Instance Core running in Americas", price=0.025),
 ]
 
 
@@ -70,6 +75,30 @@ def test_find_compute_core_sku_respects_region():
 def test_find_compute_core_sku_unknown_family_raises():
     with pytest.raises(PricingProviderError, match="No SKU matching rule"):
         m.find_compute_core_sku(COMPUTE_FIXTURES, "m1-ultramega", "us-central1")
+
+
+def test_find_compute_core_sku_does_not_confuse_prefix_families():
+    # Regression test: "c4" is a literal substring of "c4d" and "c4a" - a
+    # naive `keyword in description` match would let a c4 lookup silently
+    # resolve to a c4d/c4a SKU (or vice versa), exactly the family-mixup
+    # this platform must never produce.
+    assert m.find_compute_core_sku(COMPUTE_FIXTURES, "c4", "us-central1").base_unit_price() == pytest.approx(0.033)
+    assert m.find_compute_core_sku(COMPUTE_FIXTURES, "c4d", "us-central1").base_unit_price() == pytest.approx(0.029)
+    assert m.find_compute_core_sku(COMPUTE_FIXTURES, "c4a", "us-central1").base_unit_price() == pytest.approx(0.025)
+
+
+def test_find_compute_custom_core_and_ram_skus_select_the_custom_variant():
+    core = m.find_compute_custom_core_sku(COMPUTE_FIXTURES, "n2", "us-central1")
+    ram = m.find_compute_custom_ram_sku(COMPUTE_FIXTURES, "n2", "us-central1")
+    assert core.base_unit_price() == pytest.approx(0.999)
+    assert ram.base_unit_price() == pytest.approx(0.998)
+    assert "custom" in core.description.lower()
+    assert "custom" in ram.description.lower()
+
+
+def test_find_compute_custom_core_sku_raises_when_family_has_no_custom_sku():
+    with pytest.raises(PricingProviderError, match="No Cloud Billing Catalog SKU matched"):
+        m.find_compute_custom_core_sku(COMPUTE_FIXTURES, "e2", "us-central1")
 
 
 # -- Disks -------------------------------------------------------------

@@ -62,7 +62,7 @@ export default function ValidationPage() {
       <Card>
         <CardHeader>
           <CardTitle>Rule reference</CardTitle>
-          <CardDescription>All 13 rules the validation engine enforces (backend/app/validation/rules.py)</CardDescription>
+          <CardDescription>{VALIDATION_RULES_REFERENCE.length} of the rules the validation engine enforces (backend/app/validation/rules.py)</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>

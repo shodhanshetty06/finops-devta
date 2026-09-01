@@ -28,6 +28,12 @@ class NormalizedSpec(BaseModel):
     # "family-tier-size" naming convention, which breaks for AWS/Azure
     # instance names like "m5.xlarge" or "Standard_D4s_v5").
     family: str | None = None
+    # "predefined" or "custom" - None only when no compute was requested at
+    # all. Tells PricingEngine which SKU pair to price against (Google
+    # publishes a separate SKU for a true custom vCPU/RAM shape - see
+    # app/pricing/sku_matcher.py::find_compute_custom_core_sku) and lets
+    # line-item descriptions/the frontend summary say which kind this is.
+    machine_type_kind: str | None = None
     vcpu: int | None = None
     ram_gb: float | None = None
     instance_count: int | None = None

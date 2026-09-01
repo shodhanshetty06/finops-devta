@@ -16,6 +16,7 @@ from app.catalog.models import (
     DiskTypeSpec,
     GkeConfig,
     GpuSpec,
+    MachineFamilyCapability,
     MachineTypeSpec,
     RegionSpec,
 )
@@ -26,6 +27,18 @@ class AzureCatalogProvider(CatalogProvider):
         if family is None:
             return list(azure_mock_data.MACHINE_TYPES)
         return [m for m in azure_mock_data.MACHINE_TYPES if m.family == family]
+
+    def get_machine_type(self, name: str) -> MachineTypeSpec | None:
+        return next((m for m in azure_mock_data.MACHINE_TYPES if m.name == name), None)
+
+    def list_family_capabilities(self) -> list[MachineFamilyCapability]:
+        # Azure VM sizes are fixed predefined SKUs - no GCP-style custom
+        # vCPU/RAM machine type concept exists here either.
+        families = {m.family for m in azure_mock_data.MACHINE_TYPES}
+        return [MachineFamilyCapability(family=f, supports_custom=False) for f in sorted(families)]
+
+    def get_family_capability(self, family: str) -> MachineFamilyCapability | None:
+        return next((c for c in self.list_family_capabilities() if c.family == family), None)
 
     def list_disk_types(self) -> list[DiskTypeSpec]:
         return list(azure_mock_data.DISK_TYPES)

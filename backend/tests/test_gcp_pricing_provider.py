@@ -47,6 +47,10 @@ def _sku(sku_id, description, *, family, group="", usage="OnDemand",
 COMPUTE_SKUS = [
     _sku("CE1", "N2 Instance Core running in Americas", family="Compute", price=0.031, service_display_name="Compute Engine"),
     _sku("CE2", "N2 Instance Ram running in Americas", family="Compute", price=0.0042, service_display_name="Compute Engine"),
+    _sku("CE1C", "N2 Custom Instance Core running in Americas", family="Compute", price=0.0335, service_display_name="Compute Engine"),
+    _sku("CE2C", "N2 Custom Instance Ram running in Americas", family="Compute", price=0.0045, service_display_name="Compute Engine"),
+    _sku("CE1D", "N2D AMD Instance Core running in Americas", family="Compute", price=0.0271, service_display_name="Compute Engine"),
+    _sku("CE2D", "N2D AMD Instance Ram running in Americas", family="Compute", price=0.0036, service_display_name="Compute Engine"),
     _sku("CE3", "Storage PD Capacity in us-central1", family="Storage", price=0.04, service_display_name="Compute Engine"),
     _sku("CE4", "Nvidia Tesla T4 GPU running in Americas", family="GPU", price=0.35, service_display_name="Compute Engine"),
     # Verified against a real Cloud Billing Catalog API response
@@ -102,6 +106,26 @@ def test_compute_hourly_price_combines_core_and_ram_skus():
     price = provider.get_compute_hourly_price_for_spec(4, 16, "n2", "us-central1")
     expected = 4 * 0.031 + 16 * 0.0042
     assert price == pytest.approx(expected, rel=1e-4)
+
+
+def test_compute_hourly_price_uses_custom_sku_pair_when_requested():
+    provider = _make_provider()
+    predefined_price = provider.get_compute_hourly_price_for_spec(4, 16, "n2", "us-central1", is_custom=False)
+    custom_price = provider.get_compute_hourly_price_for_spec(4, 16, "n2", "us-central1", is_custom=True)
+    assert predefined_price == pytest.approx(4 * 0.031 + 16 * 0.0042, rel=1e-4)
+    assert custom_price == pytest.approx(4 * 0.0335 + 16 * 0.0045, rel=1e-4)
+    assert custom_price != predefined_price
+
+
+def test_compute_hourly_price_does_not_confuse_n2_and_n2d():
+    # Regression test: "N2" is a literal substring of "N2D AMD Instance Core
+    # running in Americas" - a naive `keyword in description` match would
+    # let an n2 lookup silently resolve to the n2d SKU (or vice versa).
+    provider = _make_provider()
+    n2_price = provider.get_compute_hourly_price_for_spec(1, 0, "n2", "us-central1")
+    n2d_price = provider.get_compute_hourly_price_for_spec(1, 0, "n2d", "us-central1")
+    assert n2_price == pytest.approx(0.031, rel=1e-4)
+    assert n2d_price == pytest.approx(0.0271, rel=1e-4)
 
 
 def test_disk_and_snapshot_prices():
@@ -208,6 +232,31 @@ def test_results_are_cached_across_calls_same_service():
     # Second call for the same service (Compute Engine) should be served
     # entirely from cache - no new HTTP calls.
     assert len(call_paths) == calls_after_first
+
+
+def test_changing_vcpu_ram_never_triggers_a_catalog_refetch():
+    # A customer editing a custom vCPU/RAM configuration (e.g. 2 vCPU/4 GB ->
+    # 4 vCPU/8 GB) must recompute the price from already-cached SKUs, never
+    # re-fetch the whole Compute Engine catalog - the cache key is
+    # (service_display_name, currency) only, see app/pricing/cache.py.
+    call_paths = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        call_paths.append(request.url.path)
+        if request.url.path == "/v1/services":
+            return httpx.Response(200, json={"services": [_service("SVC-CE", "Compute Engine")]})
+        return httpx.Response(200, json={"skus": COMPUTE_SKUS})
+
+    client = CloudBillingCatalogClient(api_key="k", transport=httpx.MockTransport(handler))
+    settings = Settings(FINOPS_GCP_API_KEY="k")
+    provider = GcpPricingProvider(client, InMemorySkuCache(), settings)
+
+    price_1 = provider.get_compute_hourly_price_for_spec(2, 4, "n2", "us-central1", is_custom=True)
+    calls_after_first = len(call_paths)
+    price_2 = provider.get_compute_hourly_price_for_spec(4, 8, "n2", "us-central1", is_custom=True)
+
+    assert len(call_paths) == calls_after_first  # no additional HTTP calls
+    assert price_2 == pytest.approx(price_1 * 2, rel=1e-6)  # exact double the resources, same rates
 
 
 def test_unmatched_sku_raises_pricing_provider_error():

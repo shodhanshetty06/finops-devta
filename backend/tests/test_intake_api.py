@@ -71,6 +71,25 @@ def test_upload_excel_with_auto_estimate_returns_priced_result():
     assert body["estimate"]["cost"]["total_monthly"] > 0
 
 
+def test_upload_excel_auto_estimate_blocks_on_machine_family_unavailable_in_region():
+    """Regional availability validation (Phase 4) must apply to the Excel
+    intake path exactly like the direct /api/v1/estimate call - N4A only
+    launches in us-central1/europe-west4 (mock catalog), so requesting it in
+    asia-south1 via a workbook must block auto-estimate the same way."""
+    file_bytes = _filled_questionnaire_bytes({
+        **GOOD_QUESTIONNAIRE, "Region": "asia-south1", "Machine Family": "n4a",
+    })
+    resp = client.post(
+        "/api/v1/intake/excel?auto_estimate=true",
+        files={"file": ("questionnaire.xlsx", file_bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["estimate"] is None
+    blocker_issues = [i for i in body["issues"] if i["severity"] == "blocker"]
+    assert any(i["field"] == "compute.machine_family" for i in blocker_issues)
+
+
 class _BlockingEstimationService:
     """Stub that always raises ValidationFailedError, so tests can exercise
     the auto-estimate-hits-a-blocker path without needing to construct a
@@ -139,6 +158,25 @@ def test_text_extraction_endpoint():
     assert body["requirement"]["business"]["total_users"] == 500
     assert body["requirement"]["availability"]["high_availability"] is True
     assert len(body["notes"]) > 0
+
+
+def test_text_extraction_auto_estimate_blocks_on_machine_family_unavailable_in_region():
+    """Same regional availability check (Phase 4) as the Excel/API paths,
+    exercised through the free-text/AI extraction path: N4A is requested
+    explicitly in the text, asia-south1 via region_hint - N4A only launches
+    in us-central1/europe-west4 in the mock catalog, so this must block."""
+    resp = client.post("/api/v1/intake/text?auto_estimate=true", json={
+        "project_name": "Text N4A Test",
+        "text": "Need an n4a machine with 4 vcpus and 16gb ram.",
+        "region_hint": "asia-south1",
+    })
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["requirement"]["compute"]["machine_family"] == "n4a"
+    assert body["requirement"]["region"] == "asia-south1"
+    assert body["estimate"] is None
+    blocker_issues = [i for i in body["issues"] if i["severity"] == "blocker"]
+    assert any(i["field"] == "compute.machine_family" for i in blocker_issues)
 
 
 def test_text_extraction_with_auto_estimate():

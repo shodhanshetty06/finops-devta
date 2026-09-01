@@ -14,7 +14,10 @@ class AwsPricingProvider(PricingProvider):
     def _region_multiplier(self, region: str) -> float:
         return aws_mock_data.REGION_MULTIPLIER.get(region, 1.0)
 
-    def get_compute_hourly_price_for_spec(self, vcpu: int, ram_gb: float, family: str, region: str) -> float:
+    def get_compute_hourly_price_for_spec(self, vcpu: int, ram_gb: float, family: str, region: str, is_custom: bool = False) -> float:
+        # AWS EC2 has no custom-shape SKU distinction (see AwsCatalogProvider
+        # - every family is supports_custom=False), so `is_custom` is
+        # accepted only for interface parity with PricingProvider.
         rates = aws_mock_data.FAMILY_HOURLY_RATES.get(family)
         if rates is None:
             raise KeyError(f"No pricing data for machine family '{family}'")

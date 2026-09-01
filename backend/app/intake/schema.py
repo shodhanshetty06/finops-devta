@@ -13,6 +13,7 @@ from app.domain.enums import (
     DiskType,
     GpuType,
     MachineFamily,
+    MachineTypeKind,
     Region,
 )
 
@@ -43,10 +44,20 @@ FIELD_SCHEMA: list[FieldSpec] = [
               example="Free text - anything already running that this should replace or integrate with"),
 
     # -- Compute (leave entirely blank if you only know business requirements) --
+    # Fill EITHER "Machine Type" (a predefined type name, e.g. n4-standard-4 -
+    # its own vCPU/RAM/family are looked up automatically) OR "Machine
+    # Family" + vCPU + RAM (for a custom shape, set "Machine Type Kind" to
+    # "custom"; leaving it blank resolves to the nearest predefined type in
+    # the family, this platform's historical behavior).
     FieldSpec("Compute", "Machine Family", ("compute", "machine_family"), "enum",
               choices=[f.value for f in MachineFamily], example="e2"),
-    FieldSpec("Compute", "vCPU", ("compute", "vcpu"), "int", example="4", required_if_section_used=True),
-    FieldSpec("Compute", "RAM (GB)", ("compute", "ram_gb"), "float", example="16", required_if_section_used=True),
+    FieldSpec("Compute", "Machine Type", ("compute", "machine_type"), "str",
+              example="n4-standard-4 (leave blank to size from vCPU/RAM instead)"),
+    FieldSpec("Compute", "Machine Type Kind", ("compute", "machine_type_kind"), "enum",
+              choices=[k.value for k in MachineTypeKind],
+              example="custom (leave blank to snap to the nearest predefined type)"),
+    FieldSpec("Compute", "vCPU", ("compute", "vcpu"), "int", example="4"),
+    FieldSpec("Compute", "RAM (GB)", ("compute", "ram_gb"), "float", example="16"),
     FieldSpec("Compute", "Instance Count", ("compute", "instance_count"), "int", example="2 (default 1)"),
     FieldSpec("Compute", "GPU Type", ("compute", "gpu_type"), "enum",
               choices=[g.value for g in GpuType], example="none"),

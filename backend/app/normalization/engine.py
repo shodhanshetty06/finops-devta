@@ -7,9 +7,11 @@ that a customer's typo or unrealistic ask can never silently flow into a
 priced estimate without an explanation attached.
 """
 from app.catalog.base import CatalogProvider
+from app.catalog.models import MachineFamilyCapability
 from app.core.config import NormalizationStrategy
 from app.core.constants import HOURS_PER_MONTH
 from app.domain.assumption import Assumption
+from app.domain.enums import MachineTypeKind
 from app.domain.estimate import NormalizedDisk, NormalizedSpec
 from app.domain.requirements import CustomerRequirement
 from app.normalization.strategy import select_value
@@ -31,13 +33,12 @@ class NormalizationEngine:
 
         region = self._normalize_region(requirement, catalog, assumptions)
 
-        machine_type = family = vcpu = ram_gb = instance_count = None
+        machine_type = family = vcpu = ram_gb = instance_count = machine_type_kind = None
         gpu_type = None
         gpu_count = 0
         provisioning_model = operating_system = running_hours_per_month = None
         if requirement.compute is not None:
-            machine_type, vcpu, ram_gb = self._normalize_compute(requirement, catalog, strategy, assumptions)
-            family = requirement.compute.machine_family.value
+            machine_type, family, vcpu, ram_gb, machine_type_kind = self._normalize_compute(requirement, catalog, strategy, assumptions)
             instance_count = requirement.compute.instance_count
             gpu_type = requirement.compute.gpu_type.value if requirement.compute.gpu_type.value != "none" else None
             gpu_count = requirement.compute.gpu_count
@@ -68,6 +69,7 @@ class NormalizationEngine:
             region=region,
             machine_type=machine_type,
             family=family,
+            machine_type_kind=machine_type_kind,
             vcpu=vcpu,
             ram_gb=ram_gb,
             instance_count=instance_count,
@@ -113,13 +115,60 @@ class NormalizationEngine:
         return fallback
 
     def _normalize_compute(self, requirement, catalog: CatalogProvider, strategy, assumptions: list[Assumption]):
+        """Returns (machine_type_name, family, vcpu, ram_gb, machine_type_kind).
+
+        Three ways a ComputeRequirement resolves, checked in order:
+          1. `machine_type` given -> that predefined type's own vcpu/ram/family
+             wins outright (see ComputeRequirement's docstring).
+          2. `machine_type_kind == "custom"` (and no `machine_type`) -> price
+             the exact requested vcpu/ram_gb, after checking the family's
+             MachineFamilyCapability. Validation (CustomMachineTypeValidationRule)
+             already blocks an unsupported/out-of-range request before this
+             ever runs, unless the caller passed force=True - in that case
+             this clamps into range rather than silently mispricing.
+          3. Neither given -> this platform's historical behavior: resolve to
+             an exact predefined match, or snap to the nearest one per the
+             configured NormalizationStrategy.
+        """
         c = requirement.compute
-        machine_types = catalog.list_machine_types(family=c.machine_family.value)
+        family = c.machine_family.value
+
+        if c.machine_type:
+            spec = catalog.get_machine_type(c.machine_type)
+            if spec is not None:
+                if spec.family != family:
+                    assumptions.append(Assumption(
+                        field="compute.machine_family",
+                        requested_value=family,
+                        used_value=spec.family,
+                        reason=f"'{c.machine_type}' belongs to the '{spec.family}' family, not the declared '{family}'; the machine type's own family was used.",
+                        strategy_applied=strategy.value,
+                    ))
+                return spec.name, spec.family, spec.vcpu, spec.ram_gb, "predefined"
+
+            assumptions.append(Assumption(
+                field="compute.machine_type",
+                requested_value=c.machine_type,
+                used_value="(sized from vCPU/RAM instead)" if c.vcpu else "(defaulted to the smallest type in the family)",
+                reason=f"'{c.machine_type}' is not a recognized predefined Compute Engine machine type.",
+                strategy_applied=strategy.value,
+            ))
+            if c.vcpu is None or c.ram_gb is None:
+                fallback = min(catalog.list_machine_types(family=family), key=lambda m: m.vcpu, default=None)
+                if fallback is not None:
+                    return fallback.name, fallback.family, fallback.vcpu, fallback.ram_gb, "predefined"
+                return c.machine_type, family, 1, 1.0, "predefined"
+            # else: fall through to the vcpu/ram-based resolution below.
+
+        if c.machine_type_kind == MachineTypeKind.CUSTOM and not c.machine_type:
+            return self._normalize_custom_compute(c, family, catalog, strategy, assumptions)
+
+        machine_types = catalog.list_machine_types(family=family)
 
         exact = [m for m in machine_types if m.vcpu == c.vcpu and abs(m.ram_gb - c.ram_gb) < 1e-6]
         if exact:
             m = exact[0]
-            return m.name, m.vcpu, m.ram_gb
+            return m.name, m.family, m.vcpu, m.ram_gb, "predefined"
 
         vcpu_options = [m.vcpu for m in machine_types]
         selected_vcpu, vcpu_reason = select_value(c.vcpu, vcpu_options, strategy)
@@ -133,7 +182,7 @@ class NormalizationEngine:
                 field="compute.vcpu",
                 requested_value=str(c.vcpu),
                 used_value=str(chosen.vcpu),
-                reason=f"{c.vcpu} vCPU configuration does not exist in the {c.machine_family.value} family. Selected {vcpu_reason}.",
+                reason=f"{c.vcpu} vCPU configuration does not exist in the {family} family. Selected {vcpu_reason}.",
                 strategy_applied=strategy.value,
             ))
         if abs(chosen.ram_gb - c.ram_gb) > 1e-6:
@@ -141,10 +190,75 @@ class NormalizationEngine:
                 field="compute.ram_gb",
                 requested_value=str(c.ram_gb),
                 used_value=str(chosen.ram_gb),
-                reason=f"RAM is fixed per machine type in the {c.machine_family.value} family; '{chosen.name}' provides {chosen.ram_gb} GB.",
+                reason=f"RAM is fixed per machine type in the {family} family; '{chosen.name}' provides {chosen.ram_gb} GB.",
                 strategy_applied=strategy.value,
             ))
-        return chosen.name, chosen.vcpu, chosen.ram_gb
+        return chosen.name, chosen.family, chosen.vcpu, chosen.ram_gb, "predefined"
+
+    def _normalize_custom_compute(self, c, family: str, catalog: CatalogProvider, strategy, assumptions: list[Assumption]):
+        cap = catalog.get_family_capability(family)
+        if cap is not None and cap.supports_custom:
+            vcpu, ram_gb = self._clamp_custom_shape(c.vcpu, c.ram_gb, cap)
+            if vcpu != c.vcpu:
+                assumptions.append(Assumption(
+                    field="compute.vcpu",
+                    requested_value=str(c.vcpu), used_value=str(vcpu),
+                    reason=f"{c.vcpu} vCPU is outside the '{family}' family's supported custom range/increment; clamped to {vcpu}.",
+                    strategy_applied=strategy.value,
+                ))
+            if abs(ram_gb - c.ram_gb) > 1e-6:
+                assumptions.append(Assumption(
+                    field="compute.ram_gb",
+                    requested_value=str(c.ram_gb), used_value=str(ram_gb),
+                    reason=f"{c.ram_gb} GB RAM is outside the '{family}' family's supported custom RAM-per-vCPU range/increment; clamped to {ram_gb} GB.",
+                    strategy_applied=strategy.value,
+                ))
+            name = f"{family}-custom-{vcpu}-{int(round(ram_gb * 1024))}"
+            return name, family, vcpu, ram_gb, "custom"
+
+        # The family doesn't support custom configurations at all.
+        # CustomMachineTypeValidationRule already turns this into a BLOCKER
+        # that halts the pipeline before normalization ever runs, unless the
+        # caller explicitly passed force=True - only reachable that way.
+        machine_types = catalog.list_machine_types(family=family)
+        if machine_types:
+            chosen = min(machine_types, key=lambda m: (abs(m.vcpu - c.vcpu), abs(m.ram_gb - c.ram_gb)))
+            assumptions.append(Assumption(
+                field="compute.machine_type_kind",
+                requested_value=f"custom ({c.vcpu} vCPU / {c.ram_gb} GB)",
+                used_value=chosen.name,
+                reason=f"The '{family}' family does not support custom machine configurations; priced the closest predefined type instead (force=true was set).",
+                strategy_applied=strategy.value,
+            ))
+            return chosen.name, chosen.family, chosen.vcpu, chosen.ram_gb, "predefined"
+
+        assumptions.append(Assumption(
+            field="compute.machine_type_kind",
+            requested_value="custom",
+            used_value=f"{c.vcpu} vCPU / {c.ram_gb} GB (unvalidated)",
+            reason=f"The '{family}' family does not support custom configurations and has no predefined types either; pricing the requested shape as-is because force=true was set.",
+            strategy_applied=strategy.value,
+        ))
+        return f"{family}-custom-{c.vcpu}-{int(round(c.ram_gb * 1024))}", family, c.vcpu, c.ram_gb, "custom"
+
+    @staticmethod
+    def _clamp_custom_shape(vcpu: int, ram_gb: float, cap: MachineFamilyCapability) -> tuple[int, float]:
+        lo_vcpu = cap.min_vcpu or 1
+        hi_vcpu = cap.max_vcpu or vcpu
+        clamped_vcpu = min(max(vcpu, lo_vcpu), hi_vcpu)
+        step = cap.vcpu_step or 1
+        if step > 1 and clamped_vcpu != 1:
+            stepped = round(clamped_vcpu / step) * step
+            clamped_vcpu = min(max(stepped, lo_vcpu if lo_vcpu != 1 else step), hi_vcpu)
+
+        ratio = ram_gb / vcpu if vcpu else 0.0
+        lo_ratio = cap.min_ram_gb_per_vcpu if cap.min_ram_gb_per_vcpu is not None else 0.0
+        hi_ratio = cap.max_ram_gb_per_vcpu if cap.max_ram_gb_per_vcpu is not None else float("inf")
+        clamped_ratio = min(max(ratio, lo_ratio), hi_ratio)
+        increment = cap.ram_increment_gb or 0.25
+        raw_ram = clamped_vcpu * clamped_ratio
+        clamped_ram = round(round(raw_ram / increment) * increment, 2)
+        return int(clamped_vcpu), clamped_ram
 
     def _normalize_storage(self, requirement, catalog: CatalogProvider, assumptions: list[Assumption]):
         s = requirement.storage

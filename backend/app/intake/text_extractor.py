@@ -19,11 +19,12 @@ guess.
 import re
 
 from app.domain.assumption import Assumption
-from app.domain.enums import BackupFrequency, CloudSqlEngine, Region
+from app.domain.enums import BackupFrequency, CloudSqlEngine, MachineTypeKind, Region, resolve_machine_family
 from app.domain.region_resolution import resolve_region
 from app.domain.requirements import (
     AvailabilityRequirement,
     BusinessContext,
+    ComputeRequirement,
     CustomerRequirement,
     DatabaseRequirement,
     KubernetesRequirement,
@@ -37,6 +38,21 @@ _UPTIME_RE = re.compile(
     re.IGNORECASE,
 )
 _DB_SIZE_RE = re.compile(r"(\d+)\s*gb\s*(?:database|db\b|data\s*store)", re.IGNORECASE)
+
+# Predefined machine type name, hyphen- or space-separated ("n4-standard-4",
+# "n4 standard 4", "e2 micro"). Family list ordered longest-first is not
+# required here (unlike a naive substring match) since every alternative is
+# matched as a whole word - see the module docstring on word-boundary safety
+# in app/pricing/sku_matcher.py::_family_matches for the same reasoning.
+_PREDEFINED_TYPE_RE = re.compile(
+    r"\b(c4d|c4a|c4|n4d|n4a|n4|c3d|c3|t2d|t2a|n2d|n2|n1|e2|c2|a2)[\s-]+"
+    r"(standard|highmem|highcpu|highgpu|micro|small|medium)(?:[\s-]+(\d+))?\b",
+    re.IGNORECASE,
+)
+_MACHINE_FAMILY_RE = re.compile(r"\b(c4d|c4a|c4|n4d|n4a|n4|c3d|c3|t2d|t2a|n2d|n2|n1|e2|c2|a2)\b", re.IGNORECASE)
+_CUSTOM_KEYWORD_RE = re.compile(r"\bcustom\b", re.IGNORECASE)
+_VCPU_RE = re.compile(r"(\d+)\s*(?:vcpus?|cpus?|cores?)\b", re.IGNORECASE)
+_RAM_SPEC_RE = re.compile(r"(\d+(?:\.\d+)?)\s*gi?b\s*(?:of\s+)?(?:ram|memory)\b", re.IGNORECASE)
 _EGRESS_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*(gb|tb)\s*(?:of\s+)?(?:bandwidth|egress|traffic|data\s*transfer)"
     r"(?:\s*(?:per|/|a)\s*month)?",
@@ -75,6 +91,7 @@ class NaturalLanguageRequirementExtractor:
         network = self._extract_network(lower, notes)
         kubernetes = self._extract_kubernetes(lower, notes)
         database = self._extract_database(lower, notes)
+        compute = self._extract_compute(lower, notes)
         self._note_gpu_workload(lower, notes)
 
         if database is not None and availability is not None and availability.high_availability:
@@ -93,6 +110,7 @@ class NaturalLanguageRequirementExtractor:
             network=network,
             kubernetes=kubernetes,
             database=database,
+            compute=compute,
         )
         return requirement, notes
 
@@ -245,6 +263,67 @@ class NaturalLanguageRequirementExtractor:
             strategy_applied="nlp_extraction",
         ))
         return DatabaseRequirement(required=True, engine=CloudSqlEngine.POSTGRES, size_gb=size_gb)
+
+    def _extract_compute(self, lower: str, notes: list[Assumption]) -> ComputeRequirement | None:
+        """A named predefined machine type (e.g. "n4 standard 4") wins
+        outright - its own vCPU/RAM is resolved later by the normalization
+        engine, never guessed here. Otherwise, a machine family plus an
+        explicit vCPU count and RAM figure together are required before
+        this builds anything at all - a bare "custom compute" or a lone
+        vCPU count with no family/RAM is genuinely ambiguous and is left
+        unextracted (no compute section) rather than guessed, consistent
+        with every other inference in this extractor being an explicit,
+        recorded Assumption rather than a silent default."""
+        predefined_match = _PREDEFINED_TYPE_RE.search(lower)
+        if predefined_match:
+            family_token, tier, size = predefined_match.groups()
+            machine_type = f"{family_token.lower()}-{tier.lower()}" + (f"-{size}" if size else "")
+            family = resolve_machine_family(family_token)
+            notes.append(Assumption(
+                field="compute.machine_type", requested_value="(extracted from free text)", used_value=machine_type,
+                reason=f"Detected a predefined machine type reference ('{predefined_match.group(0).strip()}') in the provided text.",
+                strategy_applied="nlp_extraction",
+            ))
+            return ComputeRequirement(machine_family=family or "e2", machine_type=machine_type)
+
+        vcpu_match = _VCPU_RE.search(lower)
+        ram_match = _RAM_SPEC_RE.search(lower)
+        is_custom = bool(_CUSTOM_KEYWORD_RE.search(lower))
+        if not (vcpu_match and ram_match):
+            return None  # not enough signal to safely size a compute block
+
+        family_match = _MACHINE_FAMILY_RE.search(lower)
+        family = resolve_machine_family(family_match.group(1)) if family_match else None
+        if family is None:
+            notes.append(Assumption(
+                field="compute.machine_family", requested_value="(not specified in text)", used_value="e2",
+                reason="A vCPU/RAM configuration was detected but no machine family was mentioned; defaulted to e2 (general-purpose, cost-optimized).",
+                strategy_applied="nlp_extraction",
+            ))
+            family = "e2"
+
+        vcpu = int(vcpu_match.group(1))
+        ram_gb = float(ram_match.group(1))
+        notes.append(Assumption(
+            field="compute.vcpu", requested_value="(extracted from free text)", used_value=str(vcpu),
+            reason=f"Detected a vCPU count ('{vcpu_match.group(0).strip()}') in the provided text.",
+            strategy_applied="nlp_extraction",
+        ))
+        notes.append(Assumption(
+            field="compute.ram_gb", requested_value="(extracted from free text)", used_value=str(ram_gb),
+            reason=f"Detected a RAM figure ('{ram_match.group(0).strip()}') in the provided text.",
+            strategy_applied="nlp_extraction",
+        ))
+        if is_custom:
+            notes.append(Assumption(
+                field="compute.machine_type_kind", requested_value="(extracted from free text)", used_value="custom",
+                reason="Detected the word 'custom' alongside a machine family/vCPU/RAM in the provided text; this exact configuration will be priced rather than substituting a nearby predefined size.",
+                strategy_applied="nlp_extraction",
+            ))
+        return ComputeRequirement(
+            machine_family=family, vcpu=vcpu, ram_gb=ram_gb,
+            machine_type_kind=MachineTypeKind.CUSTOM if is_custom else None,
+        )
 
     def _note_gpu_workload(self, lower: str, notes: list[Assumption]) -> None:
         if any(kw in lower for kw in _GPU_KEYWORDS):

@@ -76,12 +76,14 @@ class PricingEngine:
             # predates the `family` field (e.g. a Phase 1-8 saved estimate
             # reloaded from the database without a migration backfill).
             family = spec.family or spec.machine_type.split("-")[0]
-            hourly = provider.get_compute_hourly_price_for_spec(spec.vcpu, spec.ram_gb, family, spec.region)
+            is_custom_machine = spec.machine_type_kind == "custom"
+            hourly = provider.get_compute_hourly_price_for_spec(spec.vcpu, spec.ram_gb, family, spec.region, is_custom=is_custom_machine)
             monthly = hourly * effective_hours * spec.instance_count
             spot_note = " (Spot)" if is_spot else ""
+            custom_note = " (custom)" if is_custom_machine else ""
             line_items.append(CostLineItem(
                 category="Compute",
-                description=f"{spec.machine_type}{spot_note} x {spec.instance_count} instance(s) ({spec.region})",
+                description=f"{spec.machine_type}{custom_note}{spot_note} x {spec.instance_count} instance(s) ({spec.region})",
                 sku_id=f"compute-{spec.machine_type}",
                 unit="hour",
                 quantity=effective_hours * spec.instance_count,

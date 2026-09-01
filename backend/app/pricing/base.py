@@ -16,9 +16,15 @@ class PricingProvider(ABC):
     source_name: str
 
     @abstractmethod
-    def get_compute_hourly_price_for_spec(self, vcpu: int, ram_gb: float, family: str, region: str) -> float:
+    def get_compute_hourly_price_for_spec(self, vcpu: int, ram_gb: float, family: str, region: str, is_custom: bool = False) -> float:
         """Priced by vCPU + RAM (Google Cloud's actual pricing model), not by
-        machine type name alone, since custom machine types are priced this way."""
+        machine type name alone, since custom machine types are priced this
+        way. `is_custom=True` selects the family's dedicated custom-shape
+        SKU pair where Google publishes one (see
+        app/pricing/sku_matcher.py::find_compute_custom_core_sku) rather than
+        the predefined-type SKU pair - Google sometimes prices these
+        slightly differently, even though the vcpu x rate + ram_gb x rate
+        formula is identical either way."""
         ...
 
     @abstractmethod

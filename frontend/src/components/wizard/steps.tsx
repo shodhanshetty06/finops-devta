@@ -1,10 +1,19 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { useMemo } from "react";
+
+import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { catalogApi } from "@/lib/api-client";
+import { FAMILY_CATEGORIES, FAMILY_INFO, familyLabel } from "@/lib/machine-family-info";
 import { cn } from "@/lib/utils";
 import {
   BACKUP_FREQUENCIES,
@@ -20,7 +29,7 @@ import {
   PROVISIONING_MODELS,
   REGIONS,
 } from "@/lib/types";
-import type { AdditionalDiskRequirement, DiskType } from "@/lib/types";
+import type { AdditionalDiskRequirement, DiskType, MachineFamilyCapability } from "@/lib/types";
 
 const OS_LABELS: Record<string, string> = {
   linux: "Linux (free)",
@@ -35,12 +44,139 @@ const PROVISIONING_LABELS: Record<string, string> = {
 };
 import type { WizardState } from "@/components/wizard/use-wizard-state";
 
+/** Client-side mirror of the vCPU/RAM range checks
+ * `CustomMachineTypeValidationRule` runs authoritatively on the backend
+ * (see backend/app/validation/rules.py) - gives immediate feedback while
+ * typing instead of waiting for the debounced /validate round-trip. The
+ * backend result (via ValidationPanel) remains the source of truth. */
+function customShapeIssue(vcpu: number, ramGb: number, cap: MachineFamilyCapability): string | null {
+  if (cap.min_vcpu != null && vcpu < cap.min_vcpu) return `vCPU must be at least ${cap.min_vcpu} for this family.`;
+  if (cap.max_vcpu != null && vcpu > cap.max_vcpu) return `vCPU must be at most ${cap.max_vcpu} for this family.`;
+  if (cap.vcpu_step > 1 && vcpu !== 1 && vcpu % cap.vcpu_step !== 0) return `vCPU must be a multiple of ${cap.vcpu_step} (or exactly 1).`;
+  const ratio = vcpu > 0 ? ramGb / vcpu : 0;
+  if (cap.min_ram_gb_per_vcpu != null && ratio < cap.min_ram_gb_per_vcpu - 1e-9) {
+    return `RAM is too low for ${vcpu} vCPU - at least ${(cap.min_ram_gb_per_vcpu * vcpu).toFixed(1)} GB needed.`;
+  }
+  if (cap.max_ram_gb_per_vcpu != null && ratio > cap.max_ram_gb_per_vcpu + 1e-9) {
+    return `RAM is too high for ${vcpu} vCPU - at most ${(cap.max_ram_gb_per_vcpu * vcpu).toFixed(1)} GB allowed.`;
+  }
+  return null;
+}
+
+function customRangeHint(cap: MachineFamilyCapability): string {
+  const parts: string[] = [];
+  if (cap.min_vcpu != null || cap.max_vcpu != null) {
+    parts.push(`${cap.min_vcpu ?? 1}-${cap.max_vcpu ?? "∞"} vCPU${cap.vcpu_step > 1 ? ` (step of ${cap.vcpu_step})` : ""}`);
+  }
+  if (cap.min_ram_gb_per_vcpu != null || cap.max_ram_gb_per_vcpu != null) {
+    parts.push(`${cap.min_ram_gb_per_vcpu ?? 0}-${cap.max_ram_gb_per_vcpu ?? "∞"} GB RAM per vCPU`);
+  }
+  return parts.join(" · ");
+}
+
 function Field({ label, htmlFor, hint, children }: { label: string; htmlFor: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
       <Label htmlFor={htmlFor}>{label}</Label>
       {children}
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
+/** Number input with a unit suffix ("vCPU", "GB") inside the field, plus an
+ * optional inline error - decorative only, never part of the accessible
+ * label text (see the e2e specs' getByLabel("vCPU (per instance)") etc.). */
+function UnitInput({
+  id,
+  unit,
+  value,
+  onChange,
+  min = 1,
+  error,
+}: {
+  id: string;
+  unit: string;
+  value: number;
+  onChange: (value: number) => void;
+  min?: number;
+  error?: string | null;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="relative">
+        <Input
+          id={id}
+          type="number"
+          min={min}
+          value={value}
+          aria-invalid={!!error}
+          aria-describedby={error ? `${id}-error` : undefined}
+          onChange={(e) => onChange(Number(e.target.value))}
+          className={cn("pr-14", error && "border-error-400 focus-visible:ring-error-400")}
+        />
+        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">{unit}</span>
+      </div>
+      {error && (
+        <p id={`${id}-error`} role="alert" className="flex items-center gap-1 text-xs text-error-600 dark:text-error-400">
+          <AlertTriangle className="h-3 w-3 shrink-0" />
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ComputeConfigSummary({
+  compute,
+  region,
+  selectedMachineType,
+  regionAvailable,
+  shapeIssue,
+}: {
+  compute: NonNullable<WizardState["requirement"]["compute"]>;
+  region: string;
+  selectedMachineType: { name: string; vcpu: number; ram_gb: number } | undefined;
+  regionAvailable: boolean;
+  shapeIssue?: string | null;
+}) {
+  const willPrice = regionAvailable && !shapeIssue;
+  const isCustom = compute.machine_type_kind === "custom" && compute.machine_type == null;
+  const isPredefined = compute.machine_type != null && !!selectedMachineType;
+  const familyText = familyLabel(compute.machine_family);
+
+  let title: string;
+  let sizeLine: string;
+  if (isPredefined && selectedMachineType) {
+    title = `${familyText} · Predefined`;
+    sizeLine = `${selectedMachineType.name} — ${selectedMachineType.vcpu} vCPU · ${selectedMachineType.ram_gb} GiB RAM`;
+  } else if (isCustom) {
+    title = `${familyText} · Custom`;
+    sizeLine = `${compute.vcpu} vCPU · ${compute.ram_gb} GB RAM`;
+  } else {
+    title = `${familyText} · Auto-sized`;
+    sizeLine = `~${compute.vcpu} vCPU · ${compute.ram_gb} GB RAM requested — nearest predefined size will be used`;
+  }
+  if (compute.instance_count > 1) sizeLine += ` × ${compute.instance_count} instances`;
+
+  return (
+    <div
+      key={`${title}-${sizeLine}`}
+      className="flex flex-col gap-1 rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm animate-fade-in motion-reduce:animate-none"
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium text-foreground">{title}</span>
+        {willPrice ? (
+          <Badge variant="success" className="gap-1"><CheckCircle2 className="h-3 w-3" />Will price as configured</Badge>
+        ) : (
+          <Badge variant="destructive" className="gap-1">
+            <AlertTriangle className="h-3 w-3" />
+            {regionAvailable ? "Fix vCPU/RAM to continue" : "Blocked in this region"}
+          </Badge>
+        )}
+      </div>
+      <p className="text-muted-foreground">{sizeLine}</p>
+      <p className="text-muted-foreground">Region: {region}</p>
     </div>
   );
 }
@@ -128,6 +264,45 @@ export function BasicsStep({ state }: { state: WizardState }) {
 
 export function SizingStep({ state }: { state: WizardState }) {
   const { requirement, update, sizingMode, setSizing } = state;
+  const compute = requirement.compute;
+
+  // Both queries are small, mostly-static catalogs (16 families, <=24 types
+  // per family) - fetched once and cached, so the custom-support/region
+  // indicators below never wait on the debounced /validate call the way the
+  // full ValidationPanel does (Phase 8 requirement: instant feedback).
+  const familyCapabilitiesQuery = useQuery({
+    queryKey: ["catalog-machine-family-capabilities"],
+    queryFn: catalogApi.machineFamilyCapabilities,
+    staleTime: Infinity,
+  });
+  const capabilitiesByFamily = useMemo(() => {
+    const map = new Map<string, MachineFamilyCapability>();
+    for (const c of familyCapabilitiesQuery.data ?? []) map.set(c.family, c);
+    return map;
+  }, [familyCapabilitiesQuery.data]);
+  const capability = compute ? capabilitiesByFamily.get(compute.machine_family) : undefined;
+  const regionAvailable = !capability?.available_regions || capability.available_regions.includes(requirement.region);
+
+  const machineTypesQuery = useQuery({
+    queryKey: ["catalog-machine-types", compute?.machine_family],
+    queryFn: () => catalogApi.machineTypes(compute!.machine_family),
+    enabled: !!compute && compute.machine_type != null,
+    staleTime: 60_000,
+  });
+  const machineTypeOptions: ComboboxOption[] = useMemo(
+    () =>
+      (machineTypesQuery.data ?? []).map((m) => ({
+        value: m.name,
+        label: m.name,
+        sublabel: `${m.vcpu} vCPU · ${m.ram_gb} GiB RAM`,
+      })),
+    [machineTypesQuery.data],
+  );
+  const selectedMachineType = machineTypesQuery.data?.find((m) => m.name === compute?.machine_type);
+  const customIssue = compute && compute.machine_type_kind === "custom" && capability?.supports_custom
+    ? customShapeIssue(compute.vcpu, compute.ram_gb, capability)
+    : null;
+
   return (
     <div className="flex flex-col gap-5">
       <div className="flex gap-3">
@@ -174,19 +349,104 @@ export function SizingStep({ state }: { state: WizardState }) {
 
       {sizingMode === "explicit" && requirement.compute && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label="Machine family" htmlFor="machine_family">
+          <Field label="Machine family" htmlFor="machine_family" hint={FAMILY_INFO[requirement.compute.machine_family].description}>
             <Select
               id="machine_family"
               value={requirement.compute.machine_family}
-              onChange={(e) => update("compute", { ...requirement.compute!, machine_family: e.target.value as typeof requirement.compute.machine_family })}
+              onChange={(e) => {
+                const nextFamily = e.target.value as typeof requirement.compute.machine_family;
+                const c = requirement.compute!;
+                update("compute", {
+                  ...c,
+                  machine_family: nextFamily,
+                  // A predefined type name or custom shape is specific to the
+                  // previous family - clearing it here avoids silently
+                  // pricing e.g. "n4-standard-4" while displaying "N2D".
+                  machine_type: c.machine_type != null ? "" : c.machine_type,
+                });
+              }}
             >
-              {MACHINE_FAMILIES.map((f) => (
-                <option key={f} value={f}>
-                  {f}
-                </option>
-              ))}
+              {FAMILY_CATEGORIES.map((category) => {
+                const families = MACHINE_FAMILIES.filter((f) => FAMILY_INFO[f].category === category);
+                if (families.length === 0) return null;
+                return (
+                  <optgroup key={category} label={category}>
+                    {families.map((f) => (
+                      <option key={f} value={f}>
+                        {familyLabel(f)} - {FAMILY_INFO[f].short}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
             </Select>
           </Field>
+          <Field label="Machine type" htmlFor="machine_config_mode" hint="Predefined types resolve their own vCPU/RAM automatically. Custom prices the exact vCPU/RAM below.">
+            <Select
+              id="machine_config_mode"
+              value={requirement.compute.machine_type ? "predefined_name" : requirement.compute.machine_type_kind === "custom" ? "custom" : "auto"}
+              onChange={(e) => {
+                const mode = e.target.value;
+                const c = requirement.compute!;
+                if (mode === "predefined_name") {
+                  update("compute", { ...c, machine_type: c.machine_type || "", machine_type_kind: null });
+                } else if (mode === "custom") {
+                  update("compute", { ...c, machine_type: null, machine_type_kind: "custom" });
+                } else {
+                  update("compute", { ...c, machine_type: null, machine_type_kind: null });
+                }
+              }}
+            >
+              <option value="auto">Auto (nearest predefined size)</option>
+              <option value="predefined_name">Predefined type</option>
+              <option value="custom" disabled={capability != null && !capability.supports_custom}>
+                Custom vCPU / RAM{capability != null && !capability.supports_custom ? " (not supported)" : ""}
+              </option>
+            </Select>
+          </Field>
+
+          <div className="sm:col-span-2">
+            {capability == null ? null : capability.supports_custom ? (
+              <Badge variant="success" className="gap-1.5">
+                <CheckCircle2 className="h-3 w-3" />
+                Custom configuration supported for {familyLabel(requirement.compute.machine_family)}
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="gap-1.5">
+                Custom configuration not supported for {familyLabel(requirement.compute.machine_family)} - fixed predefined sizes only
+              </Badge>
+            )}
+          </div>
+
+          {!regionAvailable && capability?.available_regions && (
+            <div className="sm:col-span-2">
+              <Alert variant="warning" title={`${familyLabel(requirement.compute.machine_family)} is not available in ${requirement.region}`}>
+                This family currently launches only in: {capability.available_regions.join(", ")}. Calculating an estimate with
+                this combination will be blocked - choose a different region or machine family.
+              </Alert>
+            </div>
+          )}
+
+          {requirement.compute.machine_type != null && (
+            <div className="sm:col-span-2">
+              <Field
+                label="Predefined machine type"
+                htmlFor="machine_type"
+                hint={selectedMachineType ? `${selectedMachineType.vcpu} vCPU · ${selectedMachineType.ram_gb} GiB RAM` : "Search by name, e.g. \"standard-4\" or \"highmem\"."}
+              >
+                <Combobox
+                  id="machine_type"
+                  ariaLabel="Predefined machine type"
+                  value={requirement.compute.machine_type}
+                  options={machineTypeOptions}
+                  disabled={machineTypesQuery.isLoading}
+                  placeholder={machineTypesQuery.isLoading ? "Loading machine types..." : "Search machine types..."}
+                  emptyText={`No ${familyLabel(requirement.compute.machine_family)} machine types match.`}
+                  onChange={(value) => update("compute", { ...requirement.compute!, machine_type: value })}
+                />
+              </Field>
+            </div>
+          )}
           <Field label="Instance count" htmlFor="instance_count">
             <Input
               id="instance_count"
@@ -196,24 +456,41 @@ export function SizingStep({ state }: { state: WizardState }) {
               onChange={(e) => update("compute", { ...requirement.compute!, instance_count: Number(e.target.value) })}
             />
           </Field>
-          <Field label="vCPU (per instance)" htmlFor="vcpu">
-            <Input
-              id="vcpu"
-              type="number"
-              min={1}
-              value={requirement.compute.vcpu}
-              onChange={(e) => update("compute", { ...requirement.compute!, vcpu: Number(e.target.value) })}
+          {requirement.compute.machine_type == null && (
+            <>
+              <Field label={requirement.compute.machine_type_kind === "custom" ? "vCPU (custom, exact)" : "vCPU (per instance)"} htmlFor="vcpu">
+                <UnitInput
+                  id="vcpu"
+                  unit="vCPU"
+                  value={requirement.compute.vcpu}
+                  onChange={(vcpu) => update("compute", { ...requirement.compute!, vcpu })}
+                  error={customIssue}
+                />
+              </Field>
+              <Field label={requirement.compute.machine_type_kind === "custom" ? "RAM GB (custom, exact)" : "RAM GB (per instance)"} htmlFor="ram_gb"
+                hint={requirement.compute.machine_type_kind === "custom" && capability?.supports_custom ? customRangeHint(capability) : undefined}
+              >
+                <UnitInput
+                  id="ram_gb"
+                  unit="GB"
+                  value={requirement.compute.ram_gb}
+                  onChange={(ram_gb) => update("compute", { ...requirement.compute!, ram_gb })}
+                  error={customIssue}
+                />
+              </Field>
+            </>
+          )}
+
+          <div className="sm:col-span-2">
+            <ComputeConfigSummary
+              compute={requirement.compute}
+              region={requirement.region}
+              selectedMachineType={selectedMachineType}
+              regionAvailable={regionAvailable}
+              shapeIssue={customIssue}
             />
-          </Field>
-          <Field label="RAM GB (per instance)" htmlFor="ram_gb">
-            <Input
-              id="ram_gb"
-              type="number"
-              min={1}
-              value={requirement.compute.ram_gb}
-              onChange={(e) => update("compute", { ...requirement.compute!, ram_gb: Number(e.target.value) })}
-            />
-          </Field>
+          </div>
+
           <Field label="GPU type" htmlFor="gpu_type">
             <Select
               id="gpu_type"

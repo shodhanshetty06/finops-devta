@@ -1,5 +1,6 @@
-// Human-readable reference for the 13 rules in the backend's validation
-// engine (backend/app/validation/rules.py, ALL_RULES). Descriptions are
+// Human-readable reference for rules in the backend's validation engine
+// (backend/app/validation/rules.py, ALL_RULES) - not necessarily every rule
+// in ALL_RULES. Descriptions are
 // transcribed from each rule's actual `evaluate()` logic and reason
 // strings, not invented - if a rule's behavior changes, update this to
 // match.
@@ -29,6 +30,12 @@ export const VALIDATION_RULES_REFERENCE: RuleReferenceEntry[] = [
     fields: ["compute.machine_family"],
     category: "Compute",
     description: "Checks the requested vCPU/RAM pair maps to an exact predefined machine type in the family.",
+  },
+  {
+    rule: "machine_family_region_validation",
+    fields: ["compute.machine_family"],
+    category: "Compute",
+    description: "Checks the chosen machine family is actually launched in the selected region - distinct from vCPU/RAM shape checks above. Never substitutes a different region or family; a failure blocks pricing until you pick a supported region or family.",
   },
   {
     rule: "gpu_validation",

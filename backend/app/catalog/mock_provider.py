@@ -8,6 +8,7 @@ from app.catalog.models import (
     DiskTypeSpec,
     GkeConfig,
     GpuSpec,
+    MachineFamilyCapability,
     MachineTypeSpec,
     RegionSpec,
 )
@@ -18,6 +19,15 @@ class MockCatalogProvider(CatalogProvider):
         if family is None:
             return list(mock_data.MACHINE_TYPES)
         return [m for m in mock_data.MACHINE_TYPES if m.family == family]
+
+    def get_machine_type(self, name: str) -> MachineTypeSpec | None:
+        return next((m for m in mock_data.MACHINE_TYPES if m.name == name), None)
+
+    def list_family_capabilities(self) -> list[MachineFamilyCapability]:
+        return list(mock_data.MACHINE_FAMILY_CAPABILITIES)
+
+    def get_family_capability(self, family: str) -> MachineFamilyCapability | None:
+        return next((c for c in mock_data.MACHINE_FAMILY_CAPABILITIES if c.family == family), None)
 
     def list_disk_types(self) -> list[DiskTypeSpec]:
         return list(mock_data.DISK_TYPES)

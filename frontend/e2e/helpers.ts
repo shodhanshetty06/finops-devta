@@ -14,7 +14,10 @@ export async function registerAndLogin(page: Page, namePrefix: string) {
   await page.goto("/register");
   await page.getByLabel("Full name").fill(`E2E ${namePrefix}`);
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("correct-horse-battery-staple");
+  // exact: true - a "Show password" visibility-toggle button's aria-label
+  // also contains "password", which Playwright's default substring/
+  // case-insensitive getByLabel("Password") would otherwise also match.
+  await page.getByLabel("Password", { exact: true }).fill("correct-horse-battery-staple");
   await page.getByRole("button", { name: "Create account" }).click();
   // The very first request against a freshly-started backend on this
   // environment's network-mapped drive has been observed to take much

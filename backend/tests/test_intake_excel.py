@@ -152,3 +152,48 @@ def test_blank_workbook_produces_default_named_requirement_and_no_crash():
     assert req is not None
     assert req.project_name.startswith("Quick Estimate")
     assert not any(i.severity.value == "blocker" for i in issues)
+
+
+def test_predefined_machine_type_column_is_parsed():
+    wb = _blank_workbook()
+    filled = _fill_and_save(wb, {
+        "Project Name": "Predefined Type Example",
+        "Machine Type": "n4-standard-4",
+    })
+    req, issues, _region_source = ExcelQuestionnaireParser().parse(filled)
+    assert req is not None
+    assert req.compute is not None
+    assert req.compute.machine_type == "n4-standard-4"
+    assert not any(i.severity.value == "blocker" for i in issues)
+
+
+def test_custom_machine_type_kind_column_is_parsed():
+    wb = _blank_workbook()
+    filled = _fill_and_save(wb, {
+        "Project Name": "Custom N2D Example",
+        "Machine Family": "N2D",
+        "Machine Type Kind": "custom",
+        "vCPU": 2,
+        "RAM (GB)": 4,
+    })
+    req, issues, _region_source = ExcelQuestionnaireParser().parse(filled)
+    assert req is not None
+    assert req.compute.machine_family.value == "n2d"
+    assert req.compute.machine_type_kind.value == "custom"
+    assert req.compute.vcpu == 2 and req.compute.ram_gb == 4
+    assert not any(i.severity.value == "blocker" for i in issues)
+
+
+def test_machine_family_with_hyphen_variant_normalizes_to_canonical_value():
+    wb = _blank_workbook()
+    filled = _fill_and_save(wb, {
+        "Project Name": "Hyphen Variant",
+        "Machine Family": "N2-D",  # separator variant of "n2d"
+        "vCPU": 2,
+        "RAM (GB)": 8,
+    })
+    req, issues, _region_source = ExcelQuestionnaireParser().parse(filled)
+    assert req is not None
+    assert req.compute is not None
+    assert req.compute.machine_family.value == "n2d"
+    assert not any("Machine Family" in i.field for i in issues)

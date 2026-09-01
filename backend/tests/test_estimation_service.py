@@ -52,6 +52,40 @@ def test_force_overrides_blockers(catalog, pricing_provider, settings):
     assert result.cost.total_monthly > 0
 
 
+def test_pipeline_blocks_on_machine_family_unavailable_in_region(catalog, pricing_provider, settings):
+    """N4A only launches in us-central1/europe-west4 (mock catalog). Asking
+    for it in asia-south1 must block the pipeline before pricing - the
+    region-vs-family gap this test guards against Phase 4 of the machine
+    configuration work."""
+    service = make_service(catalog, pricing_provider, settings)
+    req = CustomerRequirement(
+        project_name="N4A in an unsupported region",
+        region=Region.ASIA_SOUTH1,
+        compute=ComputeRequirement(machine_family=MachineFamily.N4A, vcpu=4, ram_gb=16),
+    )
+    with pytest.raises(ValidationFailedError) as exc_info:
+        service.generate_estimate(req)
+    assert any(r.rule == "machine_family_region_validation" for r in exc_info.value.results)
+
+
+def test_force_never_silently_swaps_region_or_family_for_unavailable_combination(catalog, pricing_provider, settings):
+    """force=true means "price it anyway", never "substitute a different
+    region or family the customer didn't ask for" - normalization only
+    clamps/snaps *shape* (vCPU/RAM), it never touches region or family for
+    this rule (see NormalizationEngine._normalize_region / _normalize_compute)."""
+    service = make_service(catalog, pricing_provider, settings)
+    req = CustomerRequirement(
+        project_name="N4A in an unsupported region, forced",
+        region=Region.ASIA_SOUTH1,
+        compute=ComputeRequirement(machine_family=MachineFamily.N4A, vcpu=4, ram_gb=16),
+    )
+    result = service.generate_estimate(req, force=True)
+    assert result.validation.blocker_count > 0
+    assert result.normalized_spec.region == "asia-south1"
+    assert result.normalized_spec.family == "n4a"
+    assert result.cost.total_monthly > 0
+
+
 def test_selected_services_mixes_bridged_and_generic_pricing(catalog, pricing_provider, settings):
     service = make_service(catalog, pricing_provider, settings)
     req = CustomerRequirement(

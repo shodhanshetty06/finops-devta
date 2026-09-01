@@ -6,7 +6,7 @@ for judging whether a value is realistic/supported, not this layer.
 """
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.domain.enums import (
     BackupFrequency,
@@ -15,17 +15,30 @@ from app.domain.enums import (
     GkeEdition,
     GpuType,
     MachineFamily,
+    MachineTypeKind,
     OperatingSystem,
     ProvisioningModel,
     Region,
+    resolve_machine_family,
 )
 from app.domain.region_resolution import DEFAULT_REGION
 
 
 class ComputeRequirement(BaseModel):
+    """Either a predefined machine type (`machine_type`, e.g.
+    "n4-standard-4") or a vCPU/RAM shape must be given. `machine_type`, when
+    set, is authoritative - it always wins over `vcpu`/`ram_gb` once
+    normalized (see NormalizationEngine._normalize_compute). `machine_type_kind`
+    only matters when `machine_type` is omitted: CUSTOM means "price this
+    exact vCPU/RAM, do not substitute a nearby predefined size"; PREDEFINED
+    or omitted preserves this platform's historical behavior of resolving
+    vcpu/ram_gb to the nearest predefined machine type in the family."""
+
     machine_family: MachineFamily = MachineFamily.E2
-    vcpu: int = Field(..., gt=0, description="Requested vCPU count, as entered by the customer")
-    ram_gb: float = Field(..., gt=0, description="Requested RAM in GB")
+    machine_type: str | None = Field(default=None, description="Predefined machine type name, e.g. 'n4-standard-4'. Wins over vcpu/ram_gb when set.")
+    machine_type_kind: MachineTypeKind | None = Field(default=None, description="'custom' prices the exact requested vcpu/ram_gb; 'predefined' or omitted resolves to the nearest predefined type.")
+    vcpu: int | None = Field(default=None, gt=0, description="Requested vCPU count, as entered by the customer")
+    ram_gb: float | None = Field(default=None, gt=0, description="Requested RAM in GB")
     instance_count: int = Field(default=1, gt=0)
     gpu_type: GpuType = GpuType.NONE
     gpu_count: int = Field(default=0, ge=0)
@@ -41,12 +54,33 @@ class ComputeRequirement(BaseModel):
     hours_per_day: float | None = Field(default=None, gt=0, le=24, description="Hours/day the instance runs; omit for 24/7")
     days_per_month: float | None = Field(default=None, gt=0, le=31, description="Days/month the instance runs; omit for every day")
 
+    @field_validator("machine_family", mode="before")
+    @classmethod
+    def normalize_family(cls, v):
+        # Accepts case/separator variants ("N2D", "n2d", "N2-D", "n2 d") and
+        # resolves them to the canonical enum value; unrecognized input is
+        # passed through unchanged so Pydantic's own enum error still fires.
+        if isinstance(v, str):
+            resolved = resolve_machine_family(v)
+            if resolved is not None:
+                return resolved
+        return v
+
     @field_validator("vcpu")
     @classmethod
-    def vcpu_reasonable(cls, v: int) -> int:
-        if v > 416:
+    def vcpu_reasonable(cls, v: int | None) -> int | None:
+        if v is not None and v > 416:
             raise ValueError("vCPU count exceeds any known Google Cloud machine type (max ~416)")
         return v
+
+    @model_validator(mode="after")
+    def require_machine_type_or_sizing(self) -> "ComputeRequirement":
+        if self.machine_type is None and (self.vcpu is None or self.ram_gb is None):
+            raise ValueError(
+                "Provide either 'machine_type' (a predefined machine type name, e.g. "
+                "'n4-standard-4') or both 'vcpu' and 'ram_gb' for a custom/explicit configuration."
+            )
+        return self
 
 
 class AdditionalDiskRequirement(BaseModel):
@@ -132,6 +166,16 @@ class KubernetesRequirement(BaseModel):
     # Standard mode node pool - ignored by PricingEngine when autopilot=True.
     node_count: int = Field(default=0, ge=0, description="Regional clusters replicate this count across 3 zones (see `regional`).")
     machine_family: MachineFamily = MachineFamily.E2
+
+    @field_validator("machine_family", mode="before")
+    @classmethod
+    def normalize_family(cls, v):
+        # Same case/separator tolerance as ComputeRequirement.normalize_family.
+        if isinstance(v, str):
+            resolved = resolve_machine_family(v)
+            if resolved is not None:
+                return resolved
+        return v
     node_vcpu: int = Field(default=4, gt=0, le=416)
     node_ram_gb: float = Field(default=16, gt=0)
     node_disk_type: DiskType = DiskType.PD_BALANCED

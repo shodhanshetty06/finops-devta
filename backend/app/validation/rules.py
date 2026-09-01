@@ -8,7 +8,7 @@ request - that is the normalization engine's job.
 """
 from app.catalog.base import CatalogProvider
 from app.catalog.service_definitions import SERVICE_CATALOG_BY_ID
-from app.domain.enums import Severity
+from app.domain.enums import MachineTypeKind, Severity
 from app.domain.requirements import CustomerRequirement
 from app.domain.validation import ValidationResult
 from app.validation.base import ValidationRule
@@ -27,11 +27,37 @@ def _ok(field: str, rule: str, value: str, reason: str) -> ValidationResult:
     )
 
 
+def _uses_legacy_predefined_matching(c) -> bool:
+    """True only when NormalizationEngine will run its legacy exact-match-or-
+    snap-to-nearest path for this request (see _normalize_compute) - i.e. no
+    `machine_type` name was given directly, and no explicit `machine_type_kind`
+    (custom or predefined) was set. CpuValidationRule/RamValidationRule/
+    MachineFamilyValidationRule below only make sense in that case: a
+    directly-named machine_type is checked by MachineTypeValidationRule
+    instead, and an explicit custom shape is *expected* to not match any
+    predefined vCPU/RAM pairing - that's the point - so it's checked by
+    CustomMachineTypeValidationRule instead."""
+    return c.machine_type is None and c.machine_type_kind is None and c.vcpu is not None and c.ram_gb is not None
+
+
+def _effective_family(c, catalog: CatalogProvider) -> str:
+    """The family actually being priced: a directly-named `machine_type`'s
+    own family wins (see NormalizationEngine._normalize_compute - same
+    precedence), falling back to the declared `machine_family` when the
+    name isn't recognized (MachineTypeValidationRule already reports that
+    separately as its own BLOCKER)."""
+    if c.machine_type:
+        spec = catalog.get_machine_type(c.machine_type)
+        if spec is not None:
+            return spec.family
+    return c.machine_family.value
+
+
 class CpuValidationRule(ValidationRule):
     name = "cpu_validation"
 
     def evaluate(self, requirement: CustomerRequirement, catalog: CatalogProvider) -> list[ValidationResult]:
-        if requirement.compute is None:
+        if requirement.compute is None or not _uses_legacy_predefined_matching(requirement.compute):
             return []
         c = requirement.compute
         machine_types = catalog.list_machine_types(family=c.machine_family.value)
@@ -60,7 +86,7 @@ class RamValidationRule(ValidationRule):
     name = "ram_validation"
 
     def evaluate(self, requirement: CustomerRequirement, catalog: CatalogProvider) -> list[ValidationResult]:
-        if requirement.compute is None:
+        if requirement.compute is None or not _uses_legacy_predefined_matching(requirement.compute):
             return []
         c = requirement.compute
         machine_types = catalog.list_machine_types(family=c.machine_family.value)
@@ -90,7 +116,7 @@ class MachineFamilyValidationRule(ValidationRule):
     name = "machine_family_validation"
 
     def evaluate(self, requirement: CustomerRequirement, catalog: CatalogProvider) -> list[ValidationResult]:
-        if requirement.compute is None:
+        if requirement.compute is None or not _uses_legacy_predefined_matching(requirement.compute):
             return []
         c = requirement.compute
         machine_types = catalog.list_machine_types(family=c.machine_family.value)
@@ -118,6 +144,146 @@ class MachineFamilyValidationRule(ValidationRule):
                 "family, or an alternative family if none fits within tolerance."
             ),
         )]
+
+
+class MachineFamilyRegionValidationRule(ValidationRule):
+    """Validates that the effective machine family is actually available in
+    the selected region - distinct from CpuValidationRule/RamValidationRule/
+    CustomMachineTypeValidationRule above, which only check whether the
+    *shape* (vCPU/RAM) is valid for the family, never whether the family
+    itself can be ordered in this region at all. Runs unconditionally
+    whenever compute + a recognized region are both present - regardless of
+    predefined-by-name, custom, or legacy vCPU/RAM sizing - since regional
+    availability is a property of the family, not of how vcpu/ram_gb were
+    resolved. Never changes the family or region itself; a BLOCKER here
+    means the request cannot be priced as asked, not that it should be
+    silently substituted."""
+
+    name = "machine_family_region_validation"
+
+    def evaluate(self, requirement: CustomerRequirement, catalog: CatalogProvider) -> list[ValidationResult]:
+        if requirement.compute is None:
+            return []
+        region = requirement.region.value
+        if not catalog.is_region_supported(region):
+            return []  # RegionValidationRule already reports this as its own BLOCKER
+
+        c = requirement.compute
+        family = _effective_family(c, catalog)
+        cap = catalog.get_family_capability(family)
+        if cap is None or cap.available_regions is None or region in cap.available_regions:
+            return [_ok("compute.machine_family", self.name, f"{family} in {region}",
+                         f"The '{family}' machine family is available in '{region}'.")]
+
+        return [ValidationResult(
+            field="compute.machine_family", rule=self.name,
+            requested_value=f"{family} in {region}",
+            supported_value=", ".join(cap.available_regions), is_valid=False, severity=Severity.BLOCKER,
+            reason=f"The '{family}' machine family is not available in region '{region}'.",
+            recommendation=(
+                f"Choose a supported region for {family} ({', '.join(cap.available_regions)}), "
+                f"or switch to a different machine family available in '{region}'."
+            ),
+        )]
+
+
+class MachineTypeValidationRule(ValidationRule):
+    """Validates a directly-specified `machine_type` name (e.g.
+    "n4-standard-4") against the catalog - a customer choosing a predefined
+    machine type by name, rather than a vCPU/RAM shape."""
+
+    name = "machine_type_validation"
+
+    def evaluate(self, requirement: CustomerRequirement, catalog: CatalogProvider) -> list[ValidationResult]:
+        if requirement.compute is None or not requirement.compute.machine_type:
+            return []
+        c = requirement.compute
+        spec = catalog.get_machine_type(c.machine_type)
+        if spec is None:
+            known = sorted({m.name for m in catalog.list_machine_types(family=c.machine_family.value)})
+            return [ValidationResult(
+                field="compute.machine_type", rule=self.name, requested_value=c.machine_type,
+                supported_value=", ".join(known) or None, is_valid=False, severity=Severity.BLOCKER,
+                reason=f"'{c.machine_type}' is not a recognized predefined Compute Engine machine type.",
+                recommendation=(
+                    f"Choose one of the {c.machine_family.value} family's predefined types "
+                    f"({', '.join(known)}), or set machine_type_kind='custom' with vcpu/ram_gb instead."
+                    if known else "Set machine_type_kind='custom' with vcpu/ram_gb instead."
+                ),
+            )]
+        if spec.family != c.machine_family.value:
+            return [ValidationResult(
+                field="compute.machine_type", rule=self.name,
+                requested_value=f"{c.machine_type} (declared family: {c.machine_family.value})",
+                supported_value=spec.family, is_valid=True, severity=Severity.WARNING,
+                reason=f"'{c.machine_type}' actually belongs to the '{spec.family}' family, not the declared '{c.machine_family.value}'.",
+                recommendation=f"The machine type's own family ('{spec.family}') will be used for pricing.",
+            )]
+        return [_ok("compute.machine_type", self.name, c.machine_type,
+                     f"'{c.machine_type}' is a recognized predefined machine type ({spec.vcpu} vCPU / {spec.ram_gb} GB).")]
+
+
+class CustomMachineTypeValidationRule(ValidationRule):
+    """Validates an explicit custom vCPU/RAM request against the family's
+    MachineFamilyCapability BEFORE it reaches pricing - never assume every
+    family accepts an arbitrary custom shape (e.g. T2D/T2A/C2/A2/N4A/C4A
+    don't support custom machine types at all on real Google Cloud)."""
+
+    name = "custom_machine_type_validation"
+
+    def evaluate(self, requirement: CustomerRequirement, catalog: CatalogProvider) -> list[ValidationResult]:
+        if requirement.compute is None:
+            return []
+        c = requirement.compute
+        if c.machine_type or c.machine_type_kind != MachineTypeKind.CUSTOM:
+            return []
+        if c.vcpu is None or c.ram_gb is None:
+            return []  # already rejected by ComputeRequirement's own model validator
+
+        family = c.machine_family.value
+        cap = catalog.get_family_capability(family)
+        if cap is None or not cap.supports_custom:
+            supported = sorted(f.family for f in catalog.list_family_capabilities() if f.supports_custom)
+            return [ValidationResult(
+                field="compute.machine_type_kind", rule=self.name,
+                requested_value=f"custom ({family}, {c.vcpu} vCPU / {c.ram_gb} GB)",
+                supported_value=", ".join(supported) or None, is_valid=False, severity=Severity.BLOCKER,
+                reason=f"The '{family}' machine family does not support custom vCPU/RAM configurations.",
+                recommendation=(
+                    f"Choose a predefined {family} machine type instead, or switch to a family that "
+                    f"supports custom configurations: {', '.join(supported)}." if supported else
+                    f"Choose a predefined {family} machine type instead."
+                ),
+            )]
+
+        issues: list[str] = []
+        if cap.min_vcpu is not None and c.vcpu < cap.min_vcpu:
+            issues.append(f"vCPU must be >= {cap.min_vcpu} for {family} custom instances (got {c.vcpu}).")
+        elif cap.max_vcpu is not None and c.vcpu > cap.max_vcpu:
+            issues.append(f"vCPU must be <= {cap.max_vcpu} for {family} custom instances (got {c.vcpu}).")
+        elif cap.vcpu_step > 1 and c.vcpu != 1 and c.vcpu % cap.vcpu_step != 0:
+            issues.append(f"vCPU count must be a multiple of {cap.vcpu_step} for {family} custom instances (got {c.vcpu}).")
+
+        ram_per_vcpu = c.ram_gb / c.vcpu
+        if cap.min_ram_gb_per_vcpu is not None and ram_per_vcpu < cap.min_ram_gb_per_vcpu - 1e-9:
+            issues.append(f"RAM per vCPU ({ram_per_vcpu:.3g} GB) is below the {family} minimum of {cap.min_ram_gb_per_vcpu} GB/vCPU.")
+        if cap.max_ram_gb_per_vcpu is not None and ram_per_vcpu > cap.max_ram_gb_per_vcpu + 1e-9:
+            issues.append(f"RAM per vCPU ({ram_per_vcpu:.3g} GB) exceeds the {family} maximum of {cap.max_ram_gb_per_vcpu} GB/vCPU.")
+        increment = cap.ram_increment_gb or 0.25
+        nearest = round(c.ram_gb / increment) * increment
+        if abs(nearest - c.ram_gb) > 1e-6:
+            issues.append(f"RAM must be a multiple of {increment} GB for {family} custom instances (got {c.ram_gb} GB).")
+
+        if issues:
+            return [ValidationResult(
+                field="compute.machine_type_kind", rule=self.name,
+                requested_value=f"custom ({family}, {c.vcpu} vCPU / {c.ram_gb} GB)",
+                supported_value=None, is_valid=False, severity=Severity.BLOCKER,
+                reason=" ".join(issues),
+                recommendation="Adjust vCPU/RAM to a supported custom shape for this family, or pass force=true to price the nearest valid shape instead.",
+            )]
+        return [_ok("compute.machine_type_kind", self.name, f"custom ({family}, {c.vcpu} vCPU / {c.ram_gb} GB)",
+                     f"Custom {family} configuration is within the family's supported vCPU/RAM range.")]
 
 
 class GpuValidationRule(ValidationRule):
@@ -476,6 +642,9 @@ ALL_RULES: list[ValidationRule] = [
     CpuValidationRule(),
     RamValidationRule(),
     MachineFamilyValidationRule(),
+    MachineFamilyRegionValidationRule(),
+    MachineTypeValidationRule(),
+    CustomMachineTypeValidationRule(),
     GpuValidationRule(),
     RegionValidationRule(),
     DiskValidationRule(),

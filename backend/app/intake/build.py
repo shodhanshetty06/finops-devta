@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from pydantic import ValidationError
 
-from app.domain.enums import Severity
+from app.domain.enums import Severity, normalize_token
 from app.domain.intake import ParseIssue
 from app.domain.region_resolution import resolve_region
 from app.domain.requirements import (
@@ -74,9 +74,23 @@ def coerce_value(raw_value: object, spec) -> object:
 
     if spec.value_type == "enum":
         text = str(raw_value).strip()
+        norm = normalize_token(text)
         for choice in spec.choices or []:
-            if choice.lower() == text.lower():
+            # Separator/case-insensitive exact match only ("N2D"/"n2d"/
+            # "N2-D"/"n2 d" all resolve to "n2d") - never a substring/prefix
+            # match, which would risk "n2" incorrectly matching input meant
+            # for "n2d" (see app/domain/enums.py::normalize_token).
+            if normalize_token(choice) == norm:
                 return choice
+        if spec.path == ("compute", "machine_type_kind"):
+            # This one field also accepts a leading-word phrase ("custom
+            # machine", "custom configuration", "predefined type") since
+            # Phase 5/6 free-form intake examples use it that way - safe
+            # here specifically because there are only two, non-prefix
+            # choices ("predefined"/"custom"), unlike MachineFamily above.
+            for choice in spec.choices or []:
+                if norm.startswith(normalize_token(choice)):
+                    return choice
         raise ValueError(f"'{raw_value}' is not one of {spec.choices}")
 
     raise ValueError(f"Unknown field type '{spec.value_type}'")

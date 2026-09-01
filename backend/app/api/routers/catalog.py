@@ -14,6 +14,11 @@ def list_machine_types(family: str | None = Query(default=None), catalog: Catalo
     return catalog.list_machine_types(family=family)
 
 
+@router.get("/machine-family-capabilities", summary="List machine families and whether each supports custom vCPU/RAM configurations")
+def list_machine_family_capabilities(catalog: CatalogProvider = Depends(get_catalog_provider)):
+    return catalog.list_family_capabilities()
+
+
 @router.get("/disk-types", summary="List supported Persistent Disk types")
 def list_disk_types(catalog: CatalogProvider = Depends(get_catalog_provider)):
     return catalog.list_disk_types()

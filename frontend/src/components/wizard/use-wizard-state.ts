@@ -18,6 +18,8 @@ export type SizingMode = "explicit" | "business" | "none";
 
 const DEFAULT_COMPUTE: ComputeRequirement = {
   machine_family: "e2",
+  machine_type: null,
+  machine_type_kind: null,
   vcpu: 4,
   ram_gb: 16,
   instance_count: 1,

@@ -6,8 +6,14 @@
 
 export type Severity = "info" | "warning" | "blocker";
 
-export const MACHINE_FAMILIES = ["e2", "n2", "n2d", "c2", "a2"] as const;
+export const MACHINE_FAMILIES = [
+  "e2", "n1", "n2", "n2d", "n4", "n4d", "n4a",
+  "c2", "c3", "c3d", "c4", "c4d", "c4a", "t2d", "t2a", "a2",
+] as const;
 export type MachineFamily = (typeof MACHINE_FAMILIES)[number];
+
+export const MACHINE_TYPE_KINDS = ["predefined", "custom"] as const;
+export type MachineTypeKind = (typeof MACHINE_TYPE_KINDS)[number];
 
 export const REGIONS = [
   "us-central1", "us-east1", "us-west1",
@@ -45,6 +51,11 @@ export type NormalizationStrategy = (typeof NORMALIZATION_STRATEGIES)[number];
 
 export interface ComputeRequirement {
   machine_family: MachineFamily;
+  // Predefined type name (e.g. "n4-standard-4") - wins over vcpu/ram_gb when set.
+  machine_type?: string | null;
+  // "custom" prices the exact vcpu/ram_gb; "predefined" or omitted resolves
+  // to the nearest predefined type (this platform's historical behavior).
+  machine_type_kind?: MachineTypeKind | null;
   vcpu: number;
   ram_gb: number;
   instance_count: number;
@@ -569,6 +580,22 @@ export interface MachineTypeSpec {
   vcpu: number;
   ram_gb: number;
   supports_gpu: boolean;
+}
+
+export interface MachineFamilyCapability {
+  family: string;
+  supports_predefined: boolean;
+  supports_custom: boolean;
+  min_vcpu: number | null;
+  max_vcpu: number | null;
+  vcpu_step: number;
+  min_ram_gb_per_vcpu: number | null;
+  max_ram_gb_per_vcpu: number | null;
+  ram_increment_gb: number;
+  // null = available in every region this catalog supports; otherwise the
+  // exact list of regions this family can be ordered in (see
+  // backend/app/catalog/models.py's MachineFamilyCapability docstring).
+  available_regions: string[] | null;
 }
 
 export interface DiskTypeSpec {

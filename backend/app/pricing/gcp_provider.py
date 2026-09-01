@@ -59,10 +59,14 @@ class GcpPricingProvider(PricingProvider):
 
     # -- PricingProvider interface ---------------------------------------
 
-    def get_compute_hourly_price_for_spec(self, vcpu: int, ram_gb: float, family: str, region: str) -> float:
+    def get_compute_hourly_price_for_spec(self, vcpu: int, ram_gb: float, family: str, region: str, is_custom: bool = False) -> float:
         skus = self._get_skus(_COMPUTE_ENGINE_SERVICE)
-        core_price = self._require_price(matcher.find_compute_core_sku(skus, family, region))
-        ram_price = self._require_price(matcher.find_compute_ram_sku(skus, family, region))
+        if is_custom:
+            core_price = self._require_price(matcher.find_compute_custom_core_sku(skus, family, region))
+            ram_price = self._require_price(matcher.find_compute_custom_ram_sku(skus, family, region))
+        else:
+            core_price = self._require_price(matcher.find_compute_core_sku(skus, family, region))
+            ram_price = self._require_price(matcher.find_compute_ram_sku(skus, family, region))
         return round(vcpu * core_price + ram_gb * ram_price, 6)
 
     def get_disk_monthly_price_per_gb(self, disk_type: str, region: str) -> float:

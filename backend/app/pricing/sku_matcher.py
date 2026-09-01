@@ -39,12 +39,29 @@ from app.pricing.gcp_client import GcpSku
 
 # Google's Compute Engine SKU descriptions name families with these exact
 # tokens (case preserved as Google publishes them; matching is
-# case-insensitive so this is just for readability).
+# case-insensitive so this is just for readability). Matched as a whole word
+# (see `_family_matches` below), never a bare substring - several of these
+# tokens are literal prefixes of one another ("N2"/"N2D", "C4"/"C4D"/"C4A"),
+# so naive substring matching would let an N2 lookup silently match an N2D
+# SKU (or vice versa). New families beyond n1/n2/n2d/e2/c2/a2 are best-effort
+# approximations of Google's SKU description conventions, not verified
+# against a live credential - see this module's docstring.
 _FAMILY_KEYWORDS: dict[str, str] = {
     "e2": "E2",
+    "n1": "N1",
     "n2": "N2",
     "n2d": "N2D",
+    "n4": "N4",
+    "n4d": "N4D",
+    "n4a": "N4A",
     "c2": "Compute optimized",
+    "c3": "C3",
+    "c3d": "C3D",
+    "c4": "C4",
+    "c4d": "C4D",
+    "c4a": "C4A",
+    "t2d": "T2D",
+    "t2a": "T2A",
     "a2": "A2",
 }
 
@@ -73,6 +90,16 @@ _NAMED_SQL_TIER_KEYWORDS: dict[str, str] = {
     "db-f1-micro": "Micro",
     "db-g1-small": "Small",
 }
+
+
+def _family_matches(description: str, keyword: str) -> bool:
+    """Whole-word match, not a bare substring - `keyword in description`
+    would let family "n2" (keyword "N2") match an "N2D Instance Core"
+    description too, since "N2D" contains "N2" as a literal substring (same
+    risk for "C4"/"C4D"/"C4A" and "N4"/"N4D"/"N4A"). `\\b` word boundaries
+    require a non-word character (or string edge) on each side, so "N2"
+    never matches inside "N2D" (no boundary between the "2" and the "D")."""
+    return re.search(rf"\b{re.escape(keyword.lower())}\b", description.lower()) is not None
 
 
 def _region_matches(sku: GcpSku, region: str) -> bool:
@@ -114,7 +141,7 @@ def find_compute_core_sku(skus: list[GcpSku], family: str, region: str) -> GcpSk
         s for s in skus
         if s.resource_family == "Compute"
         and s.usage_type == "OnDemand"
-        and keyword.lower() in s.description.lower()
+        and _family_matches(s.description, keyword)
         and "core" in s.description.lower()
         and "custom" not in s.description.lower()  # custom machine types price separately
         and "sole tenancy" not in s.description.lower()
@@ -131,13 +158,54 @@ def find_compute_ram_sku(skus: list[GcpSku], family: str, region: str) -> GcpSku
         s for s in skus
         if s.resource_family == "Compute"
         and s.usage_type == "OnDemand"
-        and keyword.lower() in s.description.lower()
+        and _family_matches(s.description, keyword)
         and "ram" in s.description.lower()
         and "custom" not in s.description.lower()
         and "sole tenancy" not in s.description.lower()
         and _region_matches(s, region)
     ]
     return _select_unique(candidates, f"compute RAM ({family}, {region})")
+
+
+def find_compute_custom_core_sku(skus: list[GcpSku], family: str, region: str) -> GcpSku:
+    """Mirrors find_compute_core_sku, but for a genuine custom machine type
+    shape - Google publishes these as a SEPARATE SKU line (e.g. "N2 Custom
+    Instance Core"), not the predefined-type SKU above. Only called for
+    families the catalog's MachineFamilyCapability marks supports_custom -
+    see app/validation/rules.py::CustomMachineTypeValidationRule, which
+    blocks a custom request before it ever reaches pricing for a family
+    that doesn't support one."""
+    keyword = _FAMILY_KEYWORDS.get(family)
+    if keyword is None:
+        raise PricingProviderError(f"No SKU matching rule configured for machine family '{family}'.")
+    candidates = [
+        s for s in skus
+        if s.resource_family == "Compute"
+        and s.usage_type == "OnDemand"
+        and _family_matches(s.description, keyword)
+        and "core" in s.description.lower()
+        and "custom" in s.description.lower()
+        and "sole tenancy" not in s.description.lower()
+        and _region_matches(s, region)
+    ]
+    return _select_unique(candidates, f"compute custom vCPU ({family}, {region})")
+
+
+def find_compute_custom_ram_sku(skus: list[GcpSku], family: str, region: str) -> GcpSku:
+    keyword = _FAMILY_KEYWORDS.get(family)
+    if keyword is None:
+        raise PricingProviderError(f"No SKU matching rule configured for machine family '{family}'.")
+    candidates = [
+        s for s in skus
+        if s.resource_family == "Compute"
+        and s.usage_type == "OnDemand"
+        and _family_matches(s.description, keyword)
+        and "ram" in s.description.lower()
+        and "custom" in s.description.lower()
+        and "sole tenancy" not in s.description.lower()
+        and _region_matches(s, region)
+    ]
+    return _select_unique(candidates, f"compute custom RAM ({family}, {region})")
 
 
 def find_disk_sku(skus: list[GcpSku], disk_type: str, region: str) -> GcpSku:

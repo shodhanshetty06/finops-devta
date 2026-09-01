@@ -1,5 +1,5 @@
 from app.core.config import NormalizationStrategy
-from app.domain.enums import MachineFamily, Region
+from app.domain.enums import MachineFamily, MachineTypeKind, Region
 from app.domain.requirements import ComputeRequirement, CustomerRequirement
 from app.normalization.engine import NormalizationEngine
 
@@ -128,3 +128,86 @@ def test_static_ip_count_passed_through_from_network(catalog):
     req = make_requirement(network=NetworkRequirement(external_ip_count=2))
     spec, _ = NormalizationEngine().normalize(req, catalog, NormalizationStrategy.BALANCED)
     assert spec.static_ip_count == 2
+
+
+# -- Machine type: predefined-by-name / custom shapes ------------------------
+
+def test_predefined_machine_type_name_resolves_its_own_vcpu_ram_and_family(catalog):
+    req = make_requirement(compute=ComputeRequirement(machine_family=MachineFamily.N4, machine_type="n4-standard-4"))
+    spec, assumptions = NormalizationEngine().normalize(req, catalog, NormalizationStrategy.BALANCED)
+    assert spec.machine_type == "n4-standard-4"
+    assert spec.family == "n4"
+    assert spec.vcpu == 4 and spec.ram_gb == 16
+    assert spec.machine_type_kind == "predefined"
+    assert assumptions == []
+
+
+def test_machine_type_family_mismatch_uses_the_machine_types_own_family(catalog):
+    # Declared family is wrong; the machine type name is authoritative.
+    req = make_requirement(compute=ComputeRequirement(machine_family=MachineFamily.E2, machine_type="n4-standard-4"))
+    spec, assumptions = NormalizationEngine().normalize(req, catalog, NormalizationStrategy.BALANCED)
+    assert spec.family == "n4"
+    assert any(a.field == "compute.machine_family" and a.used_value == "n4" for a in assumptions)
+
+
+def test_unknown_machine_type_name_falls_back_to_vcpu_ram_sizing(catalog):
+    req = make_requirement(compute=ComputeRequirement(machine_family=MachineFamily.E2, machine_type="e2-does-not-exist", vcpu=4, ram_gb=16))
+    spec, assumptions = NormalizationEngine().normalize(req, catalog, NormalizationStrategy.BALANCED)
+    assert spec.machine_type == "e2-standard-4"
+    assert any(a.field == "compute.machine_type" for a in assumptions)
+
+
+def test_custom_n2d_2vcpu_4gb_prices_the_exact_shape(catalog):
+    req = make_requirement(compute=ComputeRequirement(
+        machine_family=MachineFamily.N2D, vcpu=2, ram_gb=4, machine_type_kind=MachineTypeKind.CUSTOM,
+    ))
+    spec, assumptions = NormalizationEngine().normalize(req, catalog, NormalizationStrategy.BALANCED)
+    assert spec.family == "n2d"
+    assert spec.vcpu == 2
+    assert spec.ram_gb == 4
+    assert spec.machine_type_kind == "custom"
+    assert assumptions == []  # within N2D's supported custom range - nothing to adjust
+
+
+def test_custom_shape_outside_supported_range_is_clamped_under_force(catalog):
+    # N2D requires an even vCPU count >= 2 (see MACHINE_FAMILY_CAPABILITIES) -
+    # this only reaches normalization at all because force=True bypassed the
+    # BLOCKER CustomMachineTypeValidationRule would otherwise raise.
+    req = make_requirement(compute=ComputeRequirement(
+        machine_family=MachineFamily.N2D, vcpu=3, ram_gb=4, machine_type_kind=MachineTypeKind.CUSTOM,
+    ))
+    spec, assumptions = NormalizationEngine().normalize(req, catalog, NormalizationStrategy.BALANCED)
+    assert spec.vcpu % 2 == 0
+    assert any(a.field == "compute.vcpu" for a in assumptions)
+
+
+def test_custom_unsupported_family_falls_back_to_nearest_predefined_under_force(catalog):
+    # T2D does not support custom machine types at all.
+    req = make_requirement(compute=ComputeRequirement(
+        machine_family=MachineFamily.T2D, vcpu=3, ram_gb=10, machine_type_kind=MachineTypeKind.CUSTOM,
+    ))
+    spec, assumptions = NormalizationEngine().normalize(req, catalog, NormalizationStrategy.BALANCED)
+    assert spec.machine_type_kind == "predefined"
+    assert spec.machine_type in {m.name for m in catalog.list_machine_types(family="t2d")}
+    assert any(a.field == "compute.machine_type_kind" for a in assumptions)
+
+
+def test_custom_pricing_differs_by_region(catalog, pricing_provider):
+    from app.services.estimation_service import EstimationService
+    from app.core.config import Settings
+
+    settings = Settings(default_normalization_strategy="balanced", default_tax_rate_percent=0, support_plan_percent=0)
+    service = EstimationService(catalog=catalog, pricing_provider=pricing_provider, settings=settings)
+
+    def make(region):
+        return CustomerRequirement(
+            project_name="Custom N2D", region=region,
+            compute=ComputeRequirement(machine_family=MachineFamily.N2D, vcpu=2, ram_gb=4, machine_type_kind=MachineTypeKind.CUSTOM),
+        )
+
+    result_us = service.generate_estimate(make(Region.US_CENTRAL1))
+    result_asia = service.generate_estimate(make(Region.ASIA_SOUTH1))
+    compute_us = next(li for li in result_us.cost.line_items if li.category == "Compute")
+    compute_asia = next(li for li in result_asia.cost.line_items if li.category == "Compute")
+    assert compute_asia.monthly_amount > compute_us.monthly_amount  # asia-south1 carries a regional multiplier
+    assert "custom" in compute_us.description.lower()

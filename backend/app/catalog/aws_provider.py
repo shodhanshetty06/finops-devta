@@ -22,6 +22,7 @@ from app.catalog.models import (
     DiskTypeSpec,
     GkeConfig,
     GpuSpec,
+    MachineFamilyCapability,
     MachineTypeSpec,
     RegionSpec,
 )
@@ -32,6 +33,18 @@ class AwsCatalogProvider(CatalogProvider):
         if family is None:
             return list(aws_mock_data.MACHINE_TYPES)
         return [m for m in aws_mock_data.MACHINE_TYPES if m.family == family]
+
+    def get_machine_type(self, name: str) -> MachineTypeSpec | None:
+        return next((m for m in aws_mock_data.MACHINE_TYPES if m.name == name), None)
+
+    def list_family_capabilities(self) -> list[MachineFamilyCapability]:
+        # AWS EC2 has no equivalent of a GCP "custom machine type" - every
+        # family here is fixed predefined instance sizes only.
+        families = {m.family for m in aws_mock_data.MACHINE_TYPES}
+        return [MachineFamilyCapability(family=f, supports_custom=False) for f in sorted(families)]
+
+    def get_family_capability(self, family: str) -> MachineFamilyCapability | None:
+        return next((c for c in self.list_family_capabilities() if c.family == family), None)
 
     def list_disk_types(self) -> list[DiskTypeSpec]:
         return list(aws_mock_data.DISK_TYPES)

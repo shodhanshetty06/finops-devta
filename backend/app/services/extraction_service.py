@@ -71,6 +71,12 @@ reasonable synonyms too, but only when you are actually confident:
 - "RAM" / "Memory" / "Memory GB" -> compute.ram_gb (or database.ram_gb under a database section)
 - "Disk" / "Storage" / "Volume" -> storage.size_gb
 - "DB" / "Database" / "Cloud SQL" -> a database section (set database.required = true)
+- A named predefined machine type (e.g. "n4-standard-4", "n2d-standard-2") -> compute.machine_type;
+  leave compute.vcpu/ram_gb null in that case, its own vCPU/RAM will be looked up automatically.
+- "custom", "custom machine", "custom configuration", "custom VM" alongside a machine \
+  family/vCPU/RAM -> compute.machine_type_kind = "custom" (price that exact vCPU/RAM, \
+  do not substitute a nearby predefined size). Only set this to "predefined" if the \
+  source explicitly says "predefined" - otherwise leave it null.
 
 Respond with ONLY a single JSON object, no markdown formatting, no code \
 fences, matching exactly this shape (use null for anything not present; \
@@ -79,7 +85,7 @@ data for it at all):
 {
   "project_name": "<string or null>",
   "region_hint": "<a GCP region string such as us-central1 ONLY if explicitly stated, else null>",
-  "compute": {"machine_family": str|null, "vcpu": number|null, "ram_gb": number|null, "instance_count": number|null, "gpu_type": str|null, "gpu_count": number|null} | null,
+  "compute": {"machine_family": str|null, "machine_type": str|null, "machine_type_kind": "predefined"|"custom"|null, "vcpu": number|null, "ram_gb": number|null, "instance_count": number|null, "gpu_type": str|null, "gpu_count": number|null} | null,
   "storage": {"disk_type": str|null, "size_gb": number|null, "snapshot_enabled": bool|null, "snapshot_retention_days": number|null} | null,
   "database": {"required": bool|null, "engine": str|null, "size_gb": number|null, "vcpu": number|null, "ram_gb": number|null, "high_availability": bool|null} | null,
   "network": {"load_balancer_required": bool|null, "external_ip_count": number|null, "estimated_egress_gb_per_month": number|null, "estimated_ingress_gb_per_month": number|null, "cdn_enabled": bool|null, "vpn_required": bool|null} | null,

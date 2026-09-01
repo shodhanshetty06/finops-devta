@@ -23,6 +23,7 @@ import type {
   GkeConfig,
   GpuSpec,
   IntakeResponse,
+  MachineFamilyCapability,
   MachineTypeSpec,
   ProjectRead,
   RegionComparison,
@@ -132,6 +133,8 @@ export const estimateApi = {
 export const catalogApi = {
   machineTypes: (family?: string) =>
     http.get<MachineTypeSpec[]>("/api/v1/catalog/machine-types", { params: { family } }).then((r) => r.data),
+  machineFamilyCapabilities: () =>
+    http.get<MachineFamilyCapability[]>("/api/v1/catalog/machine-family-capabilities").then((r) => r.data),
   diskTypes: () => http.get<DiskTypeSpec[]>("/api/v1/catalog/disk-types").then((r) => r.data),
   gpuTypes: () => http.get<GpuSpec[]>("/api/v1/catalog/gpu-types").then((r) => r.data),
   regions: () => http.get<RegionSpec[]>("/api/v1/catalog/regions").then((r) => r.data),

@@ -11,7 +11,11 @@ class MockGCPPricingProvider(PricingProvider):
     def _region_multiplier(self, region: str) -> float:
         return mock_data.REGION_MULTIPLIER.get(region, 1.0)
 
-    def get_compute_hourly_price_for_spec(self, vcpu: int, ram_gb: float, family: str, region: str) -> float:
+    def get_compute_hourly_price_for_spec(self, vcpu: int, ram_gb: float, family: str, region: str, is_custom: bool = False) -> float:
+        # Mock data doesn't model a separate custom-shape rate per family
+        # (unlike the live GcpPricingProvider) - `is_custom` is accepted for
+        # interface parity but unused, since Google's real custom and
+        # predefined rates are typically within cents of each other anyway.
         rates = mock_data.FAMILY_HOURLY_RATES.get(family)
         if rates is None:
             raise KeyError(f"No pricing data for machine family '{family}'")

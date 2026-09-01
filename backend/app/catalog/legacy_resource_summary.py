@@ -53,10 +53,16 @@ def _describe(resource_name: str, spec: NormalizedSpec, requirement: CustomerReq
     """Returns (requested_configuration, normalized_configuration)."""
     if resource_name == "Compute Engine" and requirement.compute:
         c = requirement.compute
-        requested = (
-            f"{c.vcpu} vCPU / {c.ram_gb:g} GB RAM, {c.machine_family.value} family, "
-            f"{c.instance_count} instance(s)"
-        )
+        if c.machine_type:
+            # vcpu/ram_gb may be unset - a predefined machine_type name is
+            # itself the request; its own vCPU/RAM is resolved in `spec` below.
+            requested = f"{c.machine_type} ({c.machine_family.value} family), {c.instance_count} instance(s)"
+        else:
+            custom_note = " custom" if c.machine_type_kind and c.machine_type_kind.value == "custom" else ""
+            requested = (
+                f"{c.vcpu} vCPU /{custom_note} {c.ram_gb:g} GB RAM, {c.machine_family.value} family, "
+                f"{c.instance_count} instance(s)"
+            )
         normalized = (
             f"{spec.machine_type}, {spec.vcpu} vCPU / {spec.ram_gb:g} GB RAM, "
             f"{spec.operating_system}, {spec.provisioning_model}, {spec.instance_count} instance(s)"

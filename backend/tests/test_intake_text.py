@@ -82,3 +82,42 @@ def test_egress_bandwidth_detection_with_tb_conversion():
     )
     assert req.network is not None
     assert req.network.estimated_egress_gb_per_month == 2000
+
+
+def test_custom_n2d_vcpu_ram_extracted_from_free_text():
+    req, notes = NaturalLanguageRequirementExtractor().extract(
+        "Mumbai VM", "I need an N2D custom VM with 2 vCPUs and 4 GB RAM in Mumbai.",
+    )
+    assert req.compute is not None
+    assert req.compute.machine_family.value == "n2d"
+    assert req.compute.vcpu == 2
+    assert req.compute.ram_gb == 4
+    assert req.compute.machine_type_kind.value == "custom"
+    assert req.region.value == "asia-south1"
+    assert any(n.field == "compute.machine_type_kind" and n.used_value == "custom" for n in notes)
+
+
+def test_predefined_machine_type_extracted_from_free_text():
+    req, notes = NaturalLanguageRequirementExtractor().extract("Batch Job", "Need N4 standard 4.")
+    assert req.compute is not None
+    assert req.compute.machine_type == "n4-standard-4"
+    assert req.compute.machine_family.value == "n4"
+    assert any(n.field == "compute.machine_type" for n in notes)
+
+
+def test_custom_compute_without_family_defaults_to_e2_with_assumption():
+    req, notes = NaturalLanguageRequirementExtractor().extract(
+        "Generic Custom VM", "Create a custom compute configuration with 8 CPUs and 32 GB memory.",
+    )
+    assert req.compute is not None
+    assert req.compute.machine_family.value == "e2"
+    assert req.compute.vcpu == 8
+    assert req.compute.ram_gb == 32
+    assert req.compute.machine_type_kind.value == "custom"
+    assert any(n.field == "compute.machine_family" and n.used_value == "e2" for n in notes)
+
+
+def test_bare_vcpu_count_with_no_ram_or_family_is_not_guessed():
+    # Ambiguous - not enough signal to safely build a compute block.
+    req, _notes = NaturalLanguageRequirementExtractor().extract("Vague Request", "We need about 4 CPUs.")
+    assert req.compute is None

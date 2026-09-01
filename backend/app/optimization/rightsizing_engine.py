@@ -108,8 +108,12 @@ class RightsizingEngine:
             ram_ratio = usage.avg_ram_utilization_percent / TARGET_PEAK_UTILIZATION_PERCENT
             ratio = max(cpu_ratio, ram_ratio)
 
-        current_vcpu = requirement.compute.vcpu
-        current_ram = requirement.compute.ram_gb
+        # Sized from the *normalized* spec, not the raw requirement -
+        # requirement.compute.vcpu/ram_gb can be None (a `machine_type` name
+        # was given instead of a vCPU/RAM shape), and even when set, the
+        # normalized values are what was actually priced above.
+        current_vcpu = current_spec.vcpu
+        current_ram = current_spec.ram_gb
         round_fn = math.ceil if action == RightsizingAction.UPSIZE else math.floor
         new_vcpu = max(MIN_VCPU, round_fn(current_vcpu * ratio))
         new_ram = max(MIN_RAM_GB, round(current_ram * ratio, 1))
@@ -129,6 +133,11 @@ class RightsizingEngine:
             return RightsizingReport(findings=[finding], total_monthly_savings=0.0, currency=currency)
 
         resized_requirement = requirement.model_copy(deep=True)
+        # Clear machine_type/machine_type_kind so the resized estimate prices
+        # the new vcpu/ram_gb exactly, rather than re-resolving whatever
+        # predefined type or custom shape the original request specified.
+        resized_requirement.compute.machine_type = None
+        resized_requirement.compute.machine_type_kind = None
         resized_requirement.compute.vcpu = new_vcpu
         resized_requirement.compute.ram_gb = new_ram
 

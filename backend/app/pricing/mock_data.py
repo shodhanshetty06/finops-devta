@@ -9,9 +9,20 @@ Swap `MockGCPPricingProvider` for a live `GcpPricingProvider` for that.
 # USD per vCPU-hour and per GB-RAM-hour, by machine family (on-demand list price).
 FAMILY_HOURLY_RATES = {
     "e2": {"vcpu": 0.021, "ram_gb": 0.00283},
+    "n1": {"vcpu": 0.0330, "ram_gb": 0.00440},
     "n2": {"vcpu": 0.031, "ram_gb": 0.00417},
     "n2d": {"vcpu": 0.0271, "ram_gb": 0.00363},
+    "n4": {"vcpu": 0.0290, "ram_gb": 0.00390},
+    "n4d": {"vcpu": 0.0260, "ram_gb": 0.00350},
+    "n4a": {"vcpu": 0.0230, "ram_gb": 0.00310},
     "c2": {"vcpu": 0.0348, "ram_gb": 0.00463},
+    "c3": {"vcpu": 0.0340, "ram_gb": 0.00450},
+    "c3d": {"vcpu": 0.0300, "ram_gb": 0.00400},
+    "c4": {"vcpu": 0.0330, "ram_gb": 0.00440},
+    "c4d": {"vcpu": 0.0290, "ram_gb": 0.00390},
+    "c4a": {"vcpu": 0.0250, "ram_gb": 0.00330},
+    "t2d": {"vcpu": 0.0255, "ram_gb": 0.00340},
+    "t2a": {"vcpu": 0.0220, "ram_gb": 0.00290},
     "a2": {"vcpu": 0.0315, "ram_gb": 0.00424},
 }
 
@@ -109,9 +120,20 @@ COMMITTED_USE_DISCOUNT_PERCENT = {
 # in this module.
 SPOT_DISCOUNT_PERCENT = {
     "e2": 60.0,
+    "n1": 60.0,
     "n2": 60.0,
     "n2d": 60.0,
+    "n4": 60.0,
+    "n4d": 60.0,
+    "n4a": 60.0,
     "c2": 55.0,
+    "c3": 55.0,
+    "c3d": 55.0,
+    "c4": 55.0,
+    "c4d": 55.0,
+    "c4a": 55.0,
+    "t2d": 60.0,
+    "t2a": 60.0,
     "a2": 50.0,
 }
 
