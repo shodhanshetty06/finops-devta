@@ -31,13 +31,13 @@ from app.domain.requirements import (
     NetworkRequirement,
 )
 
-_USER_COUNT_RE = re.compile(r"(\d[\d,]*)\s*(concurrent\s+)?users", re.IGNORECASE)
+_USER_COUNT_RE = re.compile(r"(\d[\d,]{0,18})\s*(concurrent\s+)?users", re.IGNORECASE)
 _UPTIME_RE = re.compile(
     r"(?:(\d{2,3}(?:\.\d{1,3})?)\s*%\s*(?:uptime|availability|sla))"
     r"|(?:(?:uptime|availability|sla)[^\d%]{0,15}(\d{2,3}(?:\.\d{1,3})?)\s*%)",
     re.IGNORECASE,
 )
-_DB_SIZE_RE = re.compile(r"(\d+)\s*gb\s*(?:database|db\b|data\s*store)", re.IGNORECASE)
+_DB_SIZE_RE = re.compile(r"(\d{1,9})\s*gb\s*(?:database|db\b|data\s*store)", re.IGNORECASE)
 
 # Predefined machine type name, hyphen- or space-separated ("n4-standard-4",
 # "n4 standard 4", "e2 micro"). Family list ordered longest-first is not
@@ -51,10 +51,10 @@ _PREDEFINED_TYPE_RE = re.compile(
 )
 _MACHINE_FAMILY_RE = re.compile(r"\b(c4d|c4a|c4|n4d|n4a|n4|c3d|c3|t2d|t2a|n2d|n2|n1|e2|c2|a2)\b", re.IGNORECASE)
 _CUSTOM_KEYWORD_RE = re.compile(r"\bcustom\b", re.IGNORECASE)
-_VCPU_RE = re.compile(r"(\d+)\s*(?:vcpus?|cpus?|cores?)\b", re.IGNORECASE)
-_RAM_SPEC_RE = re.compile(r"(\d+(?:\.\d+)?)\s*gi?b\s*(?:of\s+)?(?:ram|memory)\b", re.IGNORECASE)
+_VCPU_RE = re.compile(r"(\d{1,6})\s*(?:vcpus?|cpus?|cores?)\b", re.IGNORECASE)
+_RAM_SPEC_RE = re.compile(r"(\d{1,9}(?:\.\d{1,6})?)\s*gi?b\s*(?:of\s+)?(?:ram|memory)\b", re.IGNORECASE)
 _EGRESS_RE = re.compile(
-    r"(\d+(?:\.\d+)?)\s*(gb|tb)\s*(?:of\s+)?(?:bandwidth|egress|traffic|data\s*transfer)"
+    r"(\d{1,9}(?:\.\d{1,6})?)\s*(gb|tb)\s*(?:of\s+)?(?:bandwidth|egress|traffic|data\s*transfer)"
     r"(?:\s*(?:per|/|a)\s*month)?",
     re.IGNORECASE,
 )
